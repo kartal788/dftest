@@ -454,3 +454,114 @@ async def istatistik(client: Client, message: Message):
 async def _cb(client: Client, query: CallbackQuery):
     if query.data=="stop":
         await handle_stop(query)
+# ------------------- benzerleri sil -----------------
+@Client.on_message(filters.command("benzerlerisil") & filters.private & filters.user(OWNER_ID))
+async def benzerleri_sil(client: Client, message: Message):
+    status = await message.reply_text("🔍 Yinelenen telegram kayıtları taranıyor...")
+
+    total_docs = 0
+    total_removed = 0
+    log_lines = []
+
+    collections = [
+        (movie_col, "movie"),
+        (series_col, "tv")
+    ]
+
+    for col, col_name in collections:
+        cursor = col.find({}, {"telegram": 1, "seasons": 1, "title": 1, "tmdb_id": 1, "imdb_id": 1})
+
+        for doc in cursor:
+            updated = False
+
+            # ---------- FILM ----------
+            if col_name == "movie" and "telegram" in doc:
+                seen = {}
+                new_list = []
+
+                for t in doc["telegram"]:
+                    key = (t.get("quality"), t.get("name"), t.get("size"))
+                    if key not in seen:
+                        seen[key] = True
+                        new_list.append(t)
+                    else:
+                        total_removed += 1
+                        updated = True
+
+                        log_lines.append(
+                            f"[Koleksiyon] movie\n"
+                            f"ID: {doc.get('tmdb_id')}\n"
+                            f"Başlık: {doc.get('title')}\n"
+                            f"Alan: telegram\n"
+                            f"Quality: {t.get('quality')}\n"
+                            f"Name: {t.get('name')}\n"
+                            f"Size: {t.get('size')}\n"
+                            f"{'-'*50}"
+                        )
+
+                if updated:
+                    col.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"telegram": new_list}}
+                    )
+                    total_docs += 1
+
+            # ---------- DIZI / BÖLÜM ----------
+            if col_name == "tv":
+                seasons = doc.get("seasons", [])
+                for season in seasons:
+                    season_no = season.get("season_number")
+                    for ep in season.get("episodes", []):
+                        if "telegram" not in ep:
+                            continue
+
+                        seen = {}
+                        new_list = []
+
+                        for t in ep["telegram"]:
+                            key = (t.get("quality"), t.get("name"), t.get("size"))
+                            if key not in seen:
+                                seen[key] = True
+                                new_list.append(t)
+                            else:
+                                total_removed += 1
+                                updated = True
+
+                                log_lines.append(
+                                    f"[Koleksiyon] tv\n"
+                                    f"ID: {doc.get('imdb_id')}\n"
+                                    f"Dizi: {doc.get('title')}\n"
+                                    f"Sezon: {season_no} | Bölüm: {ep.get('episode_number')}\n"
+                                    f"Quality: {t.get('quality')}\n"
+                                    f"Name: {t.get('name')}\n"
+                                    f"Size: {t.get('size')}\n"
+                                    f"{'-'*50}"
+                                )
+
+                        if updated:
+                            ep["telegram"] = new_list
+
+                if updated:
+                    col.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"seasons": seasons}}
+                    )
+                    total_docs += 1
+
+    # ---------- LOG DOSYASI ----------
+    if log_lines:
+        log_path = "silinenler.txt"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(log_lines))
+
+        await client.send_document(
+            chat_id=OWNER_ID,
+            document=log_path,
+            caption="🗑️ Silinen yinelenen telegram kayıtları"
+        )
+
+    await status.edit_text(
+        f"✅ İşlem tamamlandı\n\n"
+        f"📄 Etkilenen kayıt: {total_docs}\n"
+        f"🗑️ Silinen tekrar: {total_removed}"
+    )
