@@ -9,3 +9,5 @@ pytz
 tgcrypto
 themoviedb
 uvicorn
+deep-translator==1.11.4
+psutil
