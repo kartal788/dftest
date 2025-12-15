@@ -18,7 +18,6 @@ API_BASE = "https://pixeldrain.com/api"
 CMD_FLOOD_WAIT = 5
 
 last_command_time = {}
-delete_waiting = {}  # user_id -> files list
 
 
 # ---------------- UTIL ----------------
@@ -37,7 +36,7 @@ def human_size(size):
         size /= 1024
 
 
-# ---------------- FETCH FILES (DEDUP) ----------------
+# ---------------- FETCH FILES (DEDUP SAFE) ----------------
 
 def fetch_all_files_safe(max_pages=100):
     page = 1
@@ -87,7 +86,7 @@ async def safe_edit(msg: Message, text: str):
 # ---------------- /PIXELDRAIN ----------------
 
 @Client.on_message(filters.command("pixeldrain") & filters.private & CustomFilters.owner)
-async def pixeldrain_handler(client: Client, message: Message):
+async def pixeldrain_list(client: Client, message: Message):
     user_id = message.from_user.id
     now = time()
 
@@ -98,92 +97,60 @@ async def pixeldrain_handler(client: Client, message: Message):
 
     status = await safe_reply(message, "📂 Dosyalar alınıyor...")
 
-    files = await asyncio.to_thread(fetch_all_files_safe)
-    total_bytes = sum(f.get("size", 0) for f in files)
-    file_names = [f.get("name") or "isimsiz_dosya" for f in files]
+    try:
+        files = await asyncio.to_thread(fetch_all_files_safe)
+        total_bytes = sum(f.get("size", 0) for f in files)
+        names = [f.get("name") or "isimsiz_dosya" for f in files]
 
-    # 🔹 Normal listeleme
-    if not (message.command[1:] and message.command[1].lower() == "sil"):
-        if len(file_names) <= 10:
+        if len(names) <= 10:
             await safe_edit(
                 status,
                 "📊 **PixelDrain Özet**\n\n"
                 f"Toplam Dosya: {len(files)}\n"
                 f"Toplam Boyut: {human_size(total_bytes)}\n\n"
                 "**📁 Dosyalar:**\n" +
-                "\n".join(f"• {n}" for n in file_names) +
-                "\n\n🗑️ Silmek için:\n`/pixeldrain sil`"
+                "\n".join(f"• {n}" for n in names)
             )
         else:
-            txt_path = "dosyalar.txt"
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(file_names))
+            path = "dosyalar.txt"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(names))
 
             await client.send_document(
                 message.chat.id,
-                txt_path,
+                path,
                 caption=(
                     "📊 **PixelDrain Özet**\n\n"
                     f"Toplam Dosya: {len(files)}\n"
-                    f"Toplam Boyut: {human_size(total_bytes)}\n\n"
-                    "📁 Dosya listesi ektedir.\n\n"
-                    "🗑️ Silmek için:\n`/pixeldrain sil`"
+                    f"Toplam Boyut: {human_size(total_bytes)}"
                 )
             )
             await status.delete()
-            os.remove(txt_path)
-        return
+            os.remove(path)
 
-    # ---------------- SİLME ÖNCESİ GÖSTER ----------------
+    except Exception as e:
+        await safe_edit(status, "❌ Hata oluştu.")
+        print("PixelDrain list error:", e)
 
-    delete_waiting[user_id] = files
 
-    if len(file_names) <= 10:
+# ---------------- /PIXELDRAINSIL ----------------
+
+@Client.on_message(filters.command("pixeldrainsil") & filters.private & CustomFilters.owner)
+async def pixeldrain_delete_all(client: Client, message: Message):
+    status = await safe_reply(message, "🗑️ PixelDrain dosyaları alınıyor...")
+
+    try:
+        files = await asyncio.to_thread(fetch_all_files_safe)
+
+        if not files:
+            await safe_edit(status, "ℹ️ Silinecek dosya yok.")
+            return
+
         await safe_edit(
             status,
-            "⚠️ **SİLME ONAYI**\n\n"
-            f"Silinecek Dosya Sayısı: {len(files)}\n\n"
-            "**📁 Dosyalar:**\n" +
-            "\n".join(f"• {n}" for n in file_names) +
-            "\n\nDevam için **EVET**, iptal için **HAYIR** yaz."
+            f"🗑️ **Silme başlatıldı**\n\n"
+            f"Silinecek dosya: {len(files)}"
         )
-    else:
-        txt_path = "dosyalar.txt"
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(file_names))
-
-        await client.send_document(
-            message.chat.id,
-            txt_path,
-            caption=(
-                "⚠️ **SİLME ONAYI**\n\n"
-                f"Silinecek Dosya Sayısı: {len(files)}\n\n"
-                "📁 Dosya listesi ektedir.\n\n"
-                "Devam için **EVET**, iptal için **HAYIR** yaz."
-            )
-        )
-        await status.delete()
-        os.remove(txt_path)
-
-
-# ---------------- EVET / HAYIR ----------------
-
-@Client.on_message(filters.private & CustomFilters.owner & filters.text & ~filters.regex(r"^/"))
-async def pixeldrain_confirm(client: Client, message: Message):
-    user_id = message.from_user.id
-    text = message.text.strip().lower()
-
-    if user_id not in delete_waiting:
-        return
-
-    if text == "hayır":
-        delete_waiting.pop(user_id)
-        await safe_reply(message, "❌ Silme iptal edildi.")
-        return
-
-    if text == "evet":
-        files = delete_waiting.pop(user_id)
-        status = await safe_reply(message, "🗑️ Dosyalar siliniyor...")
 
         deleted = 0
         for f in files:
@@ -197,7 +164,15 @@ async def pixeldrain_confirm(client: Client, message: Message):
                 headers=get_headers(),
                 timeout=10
             )
+
             deleted += 1
             await asyncio.sleep(0.3)
 
-        await safe_edit(status, f"✅ Silme tamamlandı.\nSilinen dosya: {deleted}")
+        await safe_edit(
+            status,
+            f"✅ Silme tamamlandı.\nSilinen dosya: {deleted}"
+        )
+
+    except Exception as e:
+        await safe_edit(status, "❌ Silme sırasında hata oluştu.")
+        print("PixelDrain delete error:", e)
