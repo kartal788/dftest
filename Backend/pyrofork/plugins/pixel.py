@@ -6,13 +6,13 @@ from pyrogram.types import Message
 from dotenv import load_dotenv
 from Backend.helper.custom_filter import CustomFilters
 
-# .env yükle
+# .env dosyasını yükle
 load_dotenv()
 
 PIXELDRAIN_API_KEY = os.getenv("PIXELDRAIN")
 
 # Flood ayarları
-flood_wait = 30  # saniye
+FLOOD_WAIT = 30  # saniye
 last_command_time = {}
 
 @Client.on_message(filters.command("pixeldrain") & filters.private & CustomFilters.owner)
@@ -21,13 +21,13 @@ async def pixeldrain_stats(client: Client, message: Message):
     now = time()
 
     # Flood kontrolü
-    if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
-        await message.reply_text(f"⚠️ Lütfen {flood_wait} saniye bekleyin.")
+    if user_id in last_command_time and now - last_command_time[user_id] < FLOOD_WAIT:
+        await message.reply_text(f"Lütfen {FLOOD_WAIT} saniye bekleyin.")
         return
     last_command_time[user_id] = now
 
     if not PIXELDRAIN_API_KEY:
-        await message.reply_text("⚠️ PIXELDRAIN API key bulunamadı (.env).")
+        await message.reply_text("PIXELDRAIN API key bulunamadı (.env).")
         return
 
     try:
@@ -42,22 +42,31 @@ async def pixeldrain_stats(client: Client, message: Message):
 
         if response.status_code != 200:
             await message.reply_text(
-                f"⚠️ API Hatası\nKod: `{response.status_code}`\nYanıt: `{response.text}`"
+                f"PixelDrain API hatası\n"
+                f"HTTP Kod: {response.status_code}"
             )
             return
 
         data = response.json()
 
+        # Güvenli string dönüşümü
+        username = str(data.get("username", "Bilinmiyor"))
+        file_count = str(data.get("file_count", "N/A"))
+        storage_used = str(data.get("storage_used", "N/A"))
+        bandwidth_used = str(data.get("bandwidth_used", "N/A"))
+        plan = str(data.get("plan", "N/A"))
+
         text = (
-            "📊 **PixelDrain İstatistikleri**\n\n"
-            f"👤 Kullanıcı: `{data.get('username', 'Bilinmiyor')}`\n"
-            f"📦 Dosya Sayısı: `{data.get('file_count', 'N/A')}`\n"
-            f"💾 Depolama: `{data.get('storage_used', 'N/A')}`\n"
-            f"🌐 Trafik: `{data.get('bandwidth_used', 'N/A')}`\n"
-            f"⭐ Plan: `{data.get('plan', 'N/A')}`"
+            "PixelDrain İstatistikleri\n\n"
+            f"Kullanıcı: {username}\n"
+            f"Dosya Sayısı: {file_count}\n"
+            f"Depolama: {storage_used}\n"
+            f"Trafik: {bandwidth_used}\n"
+            f"Plan: {plan}"
         )
 
         await message.reply_text(text)
 
     except Exception as e:
-        await message.reply_text(f"⚠️ Beklenmeyen hata:\n`{e}`")
+        await message.reply_text("Bir hata oluştu.")
+        print("PixelDrain hata:", e)
