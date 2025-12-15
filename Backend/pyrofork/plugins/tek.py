@@ -1,12 +1,11 @@
 import os
 import asyncio
-from time import time
+from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
-from datetime import datetime
 from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
 
@@ -15,14 +14,14 @@ DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
 if len(db_urls) < 1:
     raise Exception("DATABASE bulunamadı!")
-MONGO_URL = db_urls[0]  # İlk database kullanılıyor
-DB_NAME = "dbFyvio"
+MONGO_URL = db_urls[0]
 
+DB_NAME = os.getenv("DB_NAME", "dbFyvio")
 TMDB_API = os.getenv("TMDB_API", "")
 if not TMDB_API:
     raise Exception("TMDB_API bulunamadı!")
 
-# ----------------- Mongo Async -----------------
+# ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 movie_col = db["movie"]
@@ -88,11 +87,11 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
 
-    # TMDb detay çekme
+    # TMDb detay çekme (düzeltildi: movies() -> movie())
     if season:
         details = await tmdb.tv(metadata.id).details()
-        cast = [c.name for c in details.cast[:5]] if hasattr(details, "cast") else []
-        genres = [g.name for g in details.genres] if hasattr(details, "genres") else []
+        cast = [c.name for c in getattr(details, "cast", [])[:5]]
+        genres = [g.name for g in getattr(details, "genres", [])]
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": getattr(metadata, "imdb_id", ""),
@@ -113,9 +112,9 @@ async def add_file(client: Client, message: Message):
         }
         collection = series_col
     else:
-        details = await tmdb.movies(metadata.id).details()
-        cast = [c.name for c in details.cast[:5]] if hasattr(details, "cast") else []
-        genres = [g.name for g in details.genres] if hasattr(details, "genres") else []
+        details = await tmdb.movie(metadata.id).details()  # Düzeltildi
+        cast = [c.name for c in getattr(details, "cast", [])[:5]]
+        genres = [g.name for g in getattr(details, "genres", [])]
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": getattr(metadata, "imdb_id", ""),
@@ -146,7 +145,7 @@ async def request_delete(client: Client, message: Message):
     await message.reply_text(
         "⚠️ Tüm veriler silinecek!\n"
         "Onaylamak için **Evet**, iptal etmek için **Hayır** yazın.\n"
-        "⏱ 60 saniye içinde cevap vermezsen işlem otomatik iptal edilir."
+        "⏱ 60 saniye içinde cevap vermezsen işlem iptal edilir."
     )
 
     if user_id in awaiting_confirmation:
