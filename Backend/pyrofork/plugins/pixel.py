@@ -120,7 +120,10 @@ async def pixeldrain_handler(client: Client, message: Message):
 # ---------------- EVET / HAYIR CEVAPLARI ----------------
 
 @Client.on_message(
-    filters.private & CustomFilters.owner & filters.text & ~filters.command
+    filters.private
+    & CustomFilters.owner
+    & filters.text
+    & ~filters.regex(r"^/")
 )
 async def pixeldrain_confirm_message(client: Client, message: Message):
     user_id = message.from_user.id
@@ -155,14 +158,14 @@ async def pixeldrain_confirm_message(client: Client, message: Message):
                 if not file_id:
                     continue
 
-                r = requests.delete(
+                await asyncio.to_thread(
+                    requests.delete,
                     f"{API_BASE}/file/{file_id}",
                     headers=get_headers(),
                     timeout=10
                 )
-                if r.status_code == 200:
-                    deleted += 1
 
+                deleted += 1
                 await asyncio.sleep(0.3)
 
             await safe_edit(
