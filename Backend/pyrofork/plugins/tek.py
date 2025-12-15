@@ -185,32 +185,41 @@ async def add_file(client: Client, message: Message):
             collection = movie_col
             media_type = "movie"
 
-    if not search_result:
-        await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
-        return
+        if not search_result:
+            await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
+            return
 
-    metadata = search_result[0]
-    details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
-    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
+        metadata = search_result[0]
+        details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
+        record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
 
-    # Eğer dizi ve sezon zaten varsa, mevcut sezona ekle
+    # TV dizi bölümlerini güncelleme / ekleme
     if media_type == "tv" and season and episode:
         existing = await collection.find_one({"tmdb_id": metadata.id})
+        new_episode = record["seasons"][0]["episodes"][0]
+
         if existing:
             seasons = existing.get("seasons", [])
             for s in seasons:
                 if s["season_number"] == season:
-                    s["episodes"].append(record["seasons"][0]["episodes"][0])
+                    existing_episode_numbers = [e["episode_number"] for e in s["episodes"]]
+                    if episode in existing_episode_numbers:
+                        # Mevcut episode varsa sadece telegram ekle
+                        for e in s["episodes"]:
+                            if e["episode_number"] == episode:
+                                e["telegram"].append(new_episode["telegram"][0])
+                    else:
+                        s["episodes"].append(new_episode)
                     await collection.update_one(
-                        {"_id": existing["_id"]}, 
+                        {"_id": existing["_id"]},
                         {"$set": {"seasons": seasons, "updated_on": datetime.utcnow()}}
                     )
-                    await message.reply_text(f"✅ {title} S{season}E{episode} başarıyla eklendi.")
+                    await message.reply_text(f"✅ {title} S{season}E{episode} başarıyla güncellendi.")
                     return
             # Yeni sezon ekle
             seasons.append(record["seasons"][0])
             await collection.update_one(
-                {"_id": existing["_id"]}, 
+                {"_id": existing["_id"]},
                 {"$set": {"seasons": seasons, "updated_on": datetime.utcnow()}}
             )
             await message.reply_text(f"✅ {title} S{season} yeni sezon olarak eklendi.")
