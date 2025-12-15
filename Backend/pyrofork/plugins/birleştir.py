@@ -15,8 +15,15 @@ import tempfile
 import traceback
 
 # ----------------- ENV -----------------
-MONGO_URL = os.getenv("MONGO_URL", "")  # MongoDB connection string
-DB_NAME = "dbFyvio"  # Sabit database ismi
+DATABASE_RAW = os.getenv("DATABASE", "")
+# Sadece 'mongodb+srv' ile başlayan URI'leri alıyoruz
+db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
+
+if len(db_urls) < 2:
+    raise Exception("İkinci DATABASE bulunamadı!")
+
+MONGO_URL = db_urls[1]  # ikinci database
+DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
 
@@ -36,10 +43,10 @@ async def init_db():
 tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
 API_SEMAPHORE = asyncio.Semaphore(12)
 
-# ----------------- Onay Bekleyen -----------------
-awaiting_confirmation = {}  # user_id -> asyncio.Task
+# ----------------- Onay Bekleyen ve Flood -----------------
+awaiting_confirmation = {}
 flood_wait = 30
-last_command_time = {}  # kullanıcı_id : zaman
+last_command_time = {}
 
 # ----------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
@@ -68,14 +75,12 @@ async def add_file(client: Client, message: Message):
         await message.reply_text("Başlık bulunamadı, lütfen doğru bir dosya adı girin.")
         return
 
-    # Metadata encode
     data = {"chat_id": message.chat.id, "msg_id": message.id}
     try:
         encoded_string = await encode_string(data)
     except Exception:
         encoded_string = None
 
-    # TMDb search
     async with API_SEMAPHORE:
         if season and episode:
             tmdb_search = await tmdb.search().tv(query=title)
