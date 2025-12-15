@@ -16,6 +16,7 @@ db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip()
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
 MONGO_URL = db_urls[1]
+
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -53,7 +54,6 @@ def get_year(date_obj):
     return None
 
 def pixeldrain_to_api(url: str) -> str:
-    """Pixeldrain /u/ linklerini API indirilebilir linkine çevirir."""
     match = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     if match:
         file_id = match.group(1)
@@ -61,7 +61,6 @@ def pixeldrain_to_api(url: str) -> str:
     return url
 
 async def get_filename_from_url(url: str) -> str:
-    """URL'den dosya adını, mümkünse HTTP başlıklarından alır."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url, allow_redirects=True) as resp:
@@ -76,7 +75,6 @@ async def get_filename_from_url(url: str) -> str:
         return "UNKNOWN"
 
 async def get_file_size_from_url(url: str) -> str:
-    """HTTP HEAD isteği ile dosya boyutunu alır."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url, allow_redirects=True) as resp:
@@ -98,7 +96,7 @@ async def get_file_size_from_url(url: str) -> str:
 def safe_getattr(obj, attr, default=None):
     return getattr(obj, attr, default) or default
 
-def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
+def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None, episode_backdrop=None, released=None):
     title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
     release_date = safe_getattr(metadata, "release_date", safe_getattr(metadata, "first_air_date"))
     release_year = get_year(release_date)
@@ -158,7 +156,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "episodes": [{
                     "episode_number": episode,
                     "title": filename,
+                    "episode_backdrop": episode_backdrop,
                     "overview": safe_getattr(metadata, "overview", ""),
+                    "released": released,
                     "telegram": [{
                         "quality": quality,
                         "id": url,
@@ -179,7 +179,6 @@ async def add_file(client: Client, message: Message):
         return
 
     url = pixeldrain_to_api(message.command[1])
-    # Eğer kullanıcı dosya adı vermediyse, URL'den al
     if len(message.command) > 2:
         filename = " ".join(message.command[2:])
     else:
@@ -217,15 +216,52 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
-
     size = await get_file_size_from_url(url)
-    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
-    if media_type == "movie":
-        record["telegram"][0]["size"] = size
-    else:
-        record["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
 
-    await collection.insert_one(record)
+    if media_type == "movie":
+        record = build_media_record(metadata, details, filename, url, quality, media_type)
+        record["telegram"][0]["size"] = size
+        await collection.insert_one(record)
+    else:
+        # TV dizileri için duplicate kontrolü
+        existing = await collection.find_one({"tmdb_id": metadata.id})
+        if existing:
+            # Aynı sezon var mı kontrol et
+            season_data = next((s for s in existing["seasons"] if s["season_number"] == season), None)
+            if not season_data:
+                season_data = {"season_number": season, "episodes": []}
+                existing["seasons"].append(season_data)
+
+            # Aynı bölüm var mı kontrol et
+            episode_data = next((e for e in season_data["episodes"] if e["episode_number"] == episode), None)
+            if episode_data:
+                # Bölümü güncelle
+                episode_data["telegram"].append({
+                    "quality": quality,
+                    "id": url,
+                    "name": filename,
+                    "size": size
+                })
+            else:
+                season_data["episodes"].append({
+                    "episode_number": episode,
+                    "title": filename,
+                    "episode_backdrop": "",
+                    "overview": safe_getattr(metadata, "overview", ""),
+                    "released": None,
+                    "telegram": [{
+                        "quality": quality,
+                        "id": url,
+                        "name": filename,
+                        "size": size
+                    }]
+                })
+            await collection.replace_one({"_id": existing["_id"]}, existing)
+        else:
+            record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
+            record["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
+            await collection.insert_one(record)
+
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
 # ----------------- /sil Komutu -----------------
