@@ -1,7 +1,7 @@
 import os
 import re
 import asyncio
-from datetime import datetime
+from datetime import datetime, date
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -61,6 +61,18 @@ def pixeldrain_to_api(url: str) -> str:
 def safe_getattr(obj, attr, default=None):
     return getattr(obj, attr, default) or default
 
+def to_datetime(val):
+    if isinstance(val, datetime):
+        return val
+    elif isinstance(val, date):
+        return datetime(val.year, val.month, val.day)
+    elif isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except:
+            return None
+    return None
+
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
     title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
     release_date = safe_getattr(metadata, "release_date", safe_getattr(metadata, "first_air_date"))
@@ -89,7 +101,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "cast": cast,
             "runtime": runtime,
             "media_type": "movie",
-            "updated_on": str(datetime.utcnow()),
+            "updated_on": datetime.utcnow(),
             "telegram": [{
                 "quality": quality,
                 "id": url,
@@ -104,7 +116,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "episode_number": episode,
             "title": filename,
             "overview": safe_getattr(metadata, "overview", ""),
-            "released": safe_getattr(metadata, "first_air_date", ""),
+            "released": to_datetime(safe_getattr(metadata, "first_air_date", None)),
             "episode_backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
             "telegram": [{
                 "quality": quality,
@@ -128,7 +140,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "cast": cast,
             "runtime": runtime,
             "media_type": "tv",
-            "updated_on": str(datetime.utcnow()),
+            "updated_on": datetime.utcnow(),
             "seasons": [{
                 "season_number": season,
                 "episodes": [episode_data]
@@ -189,12 +201,18 @@ async def add_file(client: Client, message: Message):
             for s in seasons:
                 if s["season_number"] == season:
                     s["episodes"].append(record["seasons"][0]["episodes"][0])
-                    await collection.update_one({"_id": existing["_id"]}, {"$set": {"seasons": seasons, "updated_on": str(datetime.utcnow())}})
+                    await collection.update_one(
+                        {"_id": existing["_id"]}, 
+                        {"$set": {"seasons": seasons, "updated_on": datetime.utcnow()}}
+                    )
                     await message.reply_text(f"✅ {title} S{season}E{episode} başarıyla eklendi.")
                     return
             # Yeni sezon ekle
             seasons.append(record["seasons"][0])
-            await collection.update_one({"_id": existing["_id"]}, {"$set": {"seasons": seasons, "updated_on": str(datetime.utcnow())}})
+            await collection.update_one(
+                {"_id": existing["_id"]}, 
+                {"$set": {"seasons": seasons, "updated_on": datetime.utcnow()}}
+            )
             await message.reply_text(f"✅ {title} S{season} yeni sezon olarak eklendi.")
             return
 
