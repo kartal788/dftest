@@ -181,7 +181,8 @@ async def add_file(client: Client, message: Message):
 
             show_metadata = search_result[0]
             show_details = await tmdb.tv(show_metadata.id).details()
-            episode_metadata = await tmdb.tv(show_metadata.id).season(season).episode(episode).details()
+            # Düzeltilmiş bölüm verisi alma
+            episode_metadata = await tmdb.tv_episode(show_metadata.id, season, episode).details()
 
             record = build_media_record(
                 metadata=episode_metadata,
