@@ -57,29 +57,33 @@ def pixeldrain_to_api(url: str) -> str:
     match = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     if match:
         file_id = match.group(1)
-        return f"https://pixeldrain.com/api/file/{file_id}"
+        return f"https://pixeldrain.com/d/{file_id}"  # Direkt indirme linki
     return url
-
-async def get_pixeldrain_file_size(url: str) -> str:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                size_bytes = data.get("size", 0)
-                if size_bytes >= 1024**3:
-                    return f"{size_bytes / 1024**3:.2f} GB"
-                elif size_bytes >= 1024**2:
-                    return f"{size_bytes / 1024**2:.2f} MB"
-                elif size_bytes >= 1024:
-                    return f"{size_bytes / 1024:.2f} KB"
-                else:
-                    return f"{size_bytes} B"
-    return "UNKNOWN"
 
 def safe_getattr(obj, attr, default=None):
     return getattr(obj, attr, default) or default
 
-def build_media_record(metadata, details, filename, url, quality, media_type, file_size, season=None, episode=None):
+async def get_file_size_from_url(url: str) -> str:
+    """HTTP HEAD isteği ile dosya boyutunu alır."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True) as resp:
+                size_bytes = resp.headers.get("Content-Length")
+                if size_bytes:
+                    size_bytes = int(size_bytes)
+                    if size_bytes < 1024:
+                        return f"{size_bytes} B"
+                    elif size_bytes < 1024**2:
+                        return f"{size_bytes / 1024:.2f} KB"
+                    elif size_bytes < 1024**3:
+                        return f"{size_bytes / (1024**2):.2f} MB"
+                    else:
+                        return f"{size_bytes / (1024**3):.2f} GB"
+    except Exception as e:
+        print(f"Dosya boyutu alınamadı: {e}")
+    return "UNKNOWN"
+
+def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
     title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
     release_date = safe_getattr(metadata, "release_date", safe_getattr(metadata, "first_air_date"))
     release_year = get_year(release_date)
@@ -112,12 +116,13 @@ def build_media_record(metadata, details, filename, url, quality, media_type, fi
                 "quality": quality,
                 "id": url,
                 "name": filename,
-                "size": file_size
+                "size": "UNKNOWN"
             }],
         }
     else:  # TV series
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
+
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -144,7 +149,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, fi
                         "quality": quality,
                         "id": url,
                         "name": filename,
-                        "size": file_size
+                        "size": "UNKNOWN"
                     }]
                 }]
             }]
@@ -193,10 +198,17 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
-    file_size = await get_pixeldrain_file_size(url)
-    record = build_media_record(metadata, details, filename, url, quality, media_type, file_size, season, episode)
+
+    # Dosya boyutunu linkten al
+    size = await get_file_size_from_url(url)
+    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
+    if media_type == "movie":
+        record["telegram"][0]["size"] = size
+    else:
+        record["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
+
     await collection.insert_one(record)
-    await message.reply_text(f"✅ {title} başarıyla eklendi. Dosya boyutu: {file_size}")
+    await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
 # ----------------- /sil Komutu -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
