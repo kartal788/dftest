@@ -1,16 +1,19 @@
 import os
 import re
+import json
 import asyncio
+from time import time
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from themoviedb import aioTMDb
 import PTN
-from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
+from Backend.helper.encrypt import encode_string
 
-# ----------------- ENV -----------------
+# ---------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
 if len(db_urls) < 2:
@@ -23,7 +26,7 @@ TMDB_API = os.getenv("TMDB_API", "")
 if not TMDB_API:
     raise Exception("TMDB_API bulunamadı!")
 
-# ----------------- MongoDB -----------------
+# ---------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 movie_col = db["movie"]
@@ -35,14 +38,14 @@ async def init_db():
     movie_col = db["movie"]
     series_col = db["tv"]
 
-# ----------------- TMDb -----------------
+# ---------------- TMDb -----------------
 tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
 API_SEMAPHORE = asyncio.Semaphore(12)
 
-# ----------------- Onay Bekleyen -----------------
+# ---------------- Onay Bekleyen -----------------
 awaiting_confirmation = {}
 
-# ----------------- Yardımcı Fonksiyonlar -----------------
+# ---------------- Yardımcı Fonksiyonlar -----------------
 def get_year(date_obj):
     if isinstance(date_obj, str):
         try:
@@ -61,7 +64,6 @@ def pixeldrain_to_api(url: str) -> str:
     return url
 
 def safe_getattr(obj, attr, default=None):
-    """Objeden güvenli şekilde attribute alır, yoksa default döner."""
     return getattr(obj, attr, default) or default
 
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
@@ -100,7 +102,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "size": "UNKNOWN"
             }],
         }
-    else:  # TV series
+    else:
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
 
@@ -137,7 +139,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         }
     return record
 
-# ----------------- /ekle Komutu -----------------
+# ---------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file(client: Client, message: Message):
     await init_db()
@@ -181,10 +183,17 @@ async def add_file(client: Client, message: Message):
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
-    await collection.insert_one(record)
+    
+    # Duplicate kontrol ve güncelleme
+    await collection.update_one(
+        {"tmdb_id": metadata.id},
+        {"$push": {"telegram": record["telegram"][0]}},
+        upsert=True
+    )
+
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
-# ----------------- /sil Komutu -----------------
+# ---------------- /sil Komutu -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def request_delete(client: Client, message: Message):
     user_id = message.from_user.id
@@ -232,3 +241,45 @@ async def handle_confirmation(client: Client, message: Message):
         )
     elif text == "hayır":
         await message.reply_text("❌ Silme işlemi iptal edildi.")
+
+# ---------------- /vindir Komutu -----------------
+flood_wait = 30  # saniye
+last_command_time = {}  # kullanıcı_id : zaman
+
+def export_collections_to_json(url):
+    client_sync = MongoClient(url)
+    db_name_list = client_sync.list_database_names()
+    if not db_name_list:
+        return None
+    db_sync = client_sync[db_name_list[0]]
+    movie_data = list(db_sync["movie"].find({}, {"_id": 0}))
+    tv_data = list(db_sync["tv"].find({}, {"_id": 0}))
+    return {"movie": movie_data, "tv": tv_data}
+
+@Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
+async def download_collections(client: Client, message: Message):
+    user_id = message.from_user.id
+    now = time()
+    if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
+        await message.reply_text(f"⚠️ Lütfen {flood_wait} saniye bekleyin.", quote=True)
+        return
+    last_command_time[user_id] = now
+
+    try:
+        combined_data = export_collections_to_json(MONGO_URL)
+        if combined_data is None:
+            await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
+            return
+
+        file_path = "/tmp/dizi_ve_film_veritabanı.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(combined_data, f, ensure_ascii=False, indent=2, default=str)
+
+        await client.send_document(
+            chat_id=message.chat.id,
+            document=file_path,
+            caption="📁 Film ve Dizi Koleksiyonları"
+        )
+    except Exception as e:
+        await message.reply_text(f"⚠️ Hata: {e}")
+        print("vindir hata:", e)
