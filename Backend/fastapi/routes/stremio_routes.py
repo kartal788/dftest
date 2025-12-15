@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
-ADDON_NAME = "Telegram"
+ADDON_NAME = "Arşivim"
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
@@ -17,10 +17,48 @@ router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 
 # Define available genres
 GENRES = [
-    "Action", "Adventure", "Animation", "Biography", "Comedy",
-    "Crime", "Documentary", "Drama", "Family", "Fantasy",
-    "History", "Horror", "Music", "Mystery", "Romance",
-    "Sci-Fi", "Sport", "Thriller", "War", "Western"
+"Aile",
+    "Aksiyon",
+    "Aksiyon ve Macera",
+    "Animasyon",
+    "Belgesel",
+    "Bilim Kurgu",
+    "Bilim Kurgu ve Fantazi",
+    "Biyografi",
+    "Çocuklar",
+    "Dram",
+    "Fantastik",
+    "Gerilim",
+    "Gerçeklik",
+    "Gizem",
+    "Haberler",
+    "Kara Film",
+    "Komedi",
+    "Korku",
+    "Kısa",
+    "Macera",
+    "Müzik",
+    "Müzikal",
+    "Oyun Gösterisi",
+    "Pembe Dizi",
+    "Romantik",
+    "Savaş",
+    "Savaş ve Politika",
+    "Spor",
+    "Suç",
+    "TV Filmi",
+    "Talk-Show",
+    "Tarih",
+    "Vahşi Batı",
+    "Tabii",
+    "Disney",
+    "Netflix",
+    "Max",
+    "Amazon",
+    "Exxen",
+    "Gain",
+    "Tv+",
+    "Tod"
 ]
 
 
@@ -60,7 +98,7 @@ def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, 
     if parsed.get("codec"):
         codec_parts.append(f"🎥 {parsed.get('codec')}")
     if parsed.get("bitDepth"):
-        codec_parts.append(f"🌈 {parsed.get('bitDepth')}bit")
+        codec_parts.append(f"🔟 {parsed.get('bitDepth')}bit")
     if parsed.get("audio"):
         codec_parts.append(f"🔊 {parsed.get('audio')}")
     if parsed.get("encoder"):
@@ -105,7 +143,7 @@ async def get_manifest():
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
-        "description": "Streams movies and series from your Telegram.",
+        "description": "Dizi ve film arşivim.",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
         "catalogs": [
