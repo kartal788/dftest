@@ -179,10 +179,12 @@ async def add_file(client: Client, message: Message):
 
             show_metadata = search_result[0]
             show_details = await tmdb.tv(show_metadata.id).details()
-            episode_metadata = await tmdb.tv(show_metadata.id).episode(season, episode).details()
+            episode_metadata = await tmdb.tv_episode(show_metadata.id, season, episode).details()
 
-            # Tekrar eklemeyi önleme
-            exists = await collection.find_one({"tmdb_id": episode_metadata.id})
+            exists = await collection.find_one({
+                "tmdb_id": show_metadata.id,
+                "seasons.episodes.episode_number": episode
+            })
             if exists:
                 await message.reply_text(f"{title} - S{season}E{episode} zaten mevcut.")
                 return
