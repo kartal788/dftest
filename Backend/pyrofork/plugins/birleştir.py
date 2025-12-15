@@ -7,7 +7,7 @@ import PTN
 from datetime import datetime
 from Backend.helper.encrypt import encode_string
 from Backend.logger import LOGGER
-from Backend.metadata import metadata  # sizin verdiğiniz metadata fonksiyonu
+from Backend/helper/metadata import metadata  # sizin verdiğiniz metadata fonksiyonu
 
 # ------------ ENV'DEN AL ------------
 db_raw = os.getenv("DATABASE", "")
