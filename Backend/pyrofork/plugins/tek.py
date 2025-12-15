@@ -266,8 +266,9 @@ async def sil(client: Client, message: Message):
 
 
 @Client.on_message(
-    filters.private & CustomFilters.owner &
-    filters.regex("^(?i)(evet|hayır)$")
+    filters.private &
+    CustomFilters.owner &
+    filters.regex("(?i)^(evet|hayır)$")
 )
 async def sil_onay(client: Client, message: Message):
     uid = message.from_user.id
@@ -282,3 +283,4 @@ async def sil_onay(client: Client, message: Message):
         await message.reply_text("✅ Tüm veriler silindi.")
     else:
         await message.reply_text("❌ İşlem iptal edildi.")
+
