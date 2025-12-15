@@ -7,6 +7,7 @@ from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
+import aiohttp
 from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
@@ -59,10 +60,26 @@ def pixeldrain_to_api(url: str) -> str:
         return f"https://pixeldrain.com/api/file/{file_id}"
     return url
 
+async def get_pixeldrain_file_size(url: str) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                size_bytes = data.get("size", 0)
+                if size_bytes >= 1024**3:
+                    return f"{size_bytes / 1024**3:.2f} GB"
+                elif size_bytes >= 1024**2:
+                    return f"{size_bytes / 1024**2:.2f} MB"
+                elif size_bytes >= 1024:
+                    return f"{size_bytes / 1024:.2f} KB"
+                else:
+                    return f"{size_bytes} B"
+    return "UNKNOWN"
+
 def safe_getattr(obj, attr, default=None):
     return getattr(obj, attr, default) or default
 
-def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
+def build_media_record(metadata, details, filename, url, quality, media_type, file_size, season=None, episode=None):
     title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
     release_date = safe_getattr(metadata, "release_date", safe_getattr(metadata, "first_air_date"))
     release_year = get_year(release_date)
@@ -95,13 +112,12 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "quality": quality,
                 "id": url,
                 "name": filename,
-                "size": "UNKNOWN"
+                "size": file_size
             }],
         }
     else:  # TV series
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
-
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -128,7 +144,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                         "quality": quality,
                         "id": url,
                         "name": filename,
-                        "size": "UNKNOWN"
+                        "size": file_size
                     }]
                 }]
             }]
@@ -177,9 +193,10 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
-    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
+    file_size = await get_pixeldrain_file_size(url)
+    record = build_media_record(metadata, details, filename, url, quality, media_type, file_size, season, episode)
     await collection.insert_one(record)
-    await message.reply_text(f"✅ {title} başarıyla eklendi.")
+    await message.reply_text(f"✅ {title} başarıyla eklendi. Dosya boyutu: {file_size}")
 
 # ----------------- /sil Komutu -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
