@@ -1,6 +1,6 @@
 from pyrogram import Client, filters
 from Backend.helper.custom_filter import CustomFilters
-from Backend.database import Database
+from Backend.helper.database import Database
 from Backend.helper.modal import MovieSchema, TVShowSchema, QualityDetail, Season, Episode
 import os
 import aiohttp
