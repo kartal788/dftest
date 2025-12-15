@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 from datetime import datetime
 from pyrogram import Client, filters
@@ -53,6 +54,17 @@ def get_year(date_obj):
     else:
         return None
 
+def pixeldrain_to_api(url: str) -> str:
+    """
+    Pixeldrain linkini API formatına çevirir:
+    https://pixeldrain.com/u/6Hk -> https://pixeldrain.com/api/file/6Hk
+    """
+    match = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
+    if match:
+        file_id = match.group(1)
+        return f"https://pixeldrain.com/api/file/{file_id}"
+    return url
+
 # ----------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file(client: Client, message: Message):
@@ -62,6 +74,7 @@ async def add_file(client: Client, message: Message):
         return
 
     url = message.command[1]
+    url = pixeldrain_to_api(url)  # Pixeldrain linklerini API formatına çevir
     filename = " ".join(message.command[2:])
 
     try:
@@ -100,7 +113,7 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
 
-    # TMDb detay çekme
+    # TMDb detay çekme ve kayıt oluşturma
     if season:
         details = await tmdb.tv(metadata.id).details()
         cast = [c.name for c in getattr(details, "cast", [])[:5]]
