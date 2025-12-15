@@ -1,104 +1,125 @@
 from pyrogram import Client, filters
-from pyrogram.types import Message
-from Backend.helper.database import Database
-from Backend.logger import LOGGER
+from Backend.helper.custom_filter import CustomFilters
+from Backend.helper import metadata as md_helper
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import asyncio
+import aiohttp
 
-# Database nesnesi
-db = Database()
+# ------------ SADECE ENV'DEN DATABASE VE PIXELDRAIN API KEY AL ------------
+db_raw = os.getenv("DATABASE", "")
+db_urls = [u.strip() for u in db_raw.split(",") if u.strip()]
+PIXELDRAIN_KEY = os.getenv("PIXELDRAIN", "")
 
-# Async init fonksiyonu
+if len(db_urls) < 2:
+    raise Exception("İkinci DATABASE bulunamadı!")
+
+MONGO_URL = db_urls[1]
+
+# ------------ MONGO BAĞLANTISI ------------
+client = AsyncIOMotorClient(MONGO_URL)
+db = None
+movie_col = None
+series_col = None
+
 async def init_db():
-    await db.connect()
-    LOGGER.info("Database initialized for medya plugin")
+    global db, movie_col, series_col
+    if db is not None:
+        return
+    db_names = await client.list_database_names()
+    db = client[db_names[0]]
+    movie_col = db["movie"]
+    series_col = db["tv"]
 
-# -----------------------------
-# /ekle Komutu
-# -----------------------------
-@Client.on_message(filters.command("ekle") & filters.private)
-async def ekle_handler(client: Client, message: Message):
-    """
-    /ekle komutu ile medya ekleme
-    Komut örneği:
-    /ekle media_type=movie tmdb_id=12345 title=MovieName quality=1080p size=1GB name=filename
-    /ekle media_type=tv tmdb_id=54321 season_number=1 episode_number=2 episode_title=E1 quality=1080p size=1GB name=filename
-    """
-    try:
-        text = message.text
-        args = {}
-        for part in text.split()[1:]:
-            if "=" in part:
-                key, value = part.split("=", 1)
-                args[key] = value
+# ------------ Onay Bekleyen Kullanıcıları Sakla ------------
+awaiting_confirmation = {}  # user_id -> asyncio.Task
 
-        media_type = args.get("media_type")
-        if not media_type:
-            await message.reply("❌ media_type belirtilmemiş.")
-            return
+# ------------ Pixeldrain API'den Dosya Adını Al ------------
+async def get_pixeldrain_filename(url: str) -> str | None:
+    api_url = f"https://pixeldrain.com/api/file/info/{url.split('/')[-1]}"
+    headers = {"Authorization": f"Bearer {PIXELDRAIN_KEY}"} if PIXELDRAIN_KEY else {}
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(api_url, headers=headers) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data.get("name")
+        except Exception:
+            return None
 
-        # DB’ye ekleme
-        result_id = await db.insert_media(args, channel=message.chat.id, msg_id=message.message_id, size=args.get("size", ""), name=args.get("name", ""))
-        if result_id:
-            await message.reply(f"✅ {media_type} başarıyla eklendi. ID: {result_id}")
-        else:
-            await message.reply(f"❌ {media_type} eklenemedi.")
+# ------------ /ekle Komutu ------------
+@Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
+async def add_link(client, message):
+    if len(message.command) < 2:
+        return await message.reply_text("❌ Lütfen bir Pixeldrain linki girin. Örnek: /ekle <link>")
 
-    except Exception as e:
-        LOGGER.error(f"/ekle komut hatası: {e}")
-        await message.reply(f"❌ Hata oluştu: {e}")
+    link = message.command[1]
+    filename = await get_pixeldrain_filename(link)
+    if not filename:
+        return await message.reply_text("❌ Dosya adı alınamadı. Linki kontrol edin veya API key eksik.")
 
+    await init_db()
+    await message.reply_text(f"🔎 Metadata çekiliyor: {filename}")
 
-# -----------------------------
-# /sil Komutu
-# -----------------------------
-@Client.on_message(filters.command("sil") & filters.private)
-async def sil_handler(client: Client, message: Message):
-    """
-    /sil komutu ile medya silme
-    Komut örneği:
-    /sil media_type=movie tmdb_id=12345
-    /sil media_type=tv tmdb_id=54321 season_number=1 episode_number=2
-    /sil media_type=tv tmdb_id=54321 season_number=1
-    /sil media_type=tv tmdb_id=54321 season_number=1 episode_number=2 id=encoded_string
-    """
-    try:
-        text = message.text
-        args = {}
-        for part in text.split()[1:]:
-            if "=" in part:
-                key, value = part.split("=", 1)
-                args[key] = value
+    # TMDb/IMDb metadata çek
+    meta = await md_helper.metadata(filename=filename, channel=message.chat.id, msg_id=message.id)
+    if not meta:
+        return await message.reply_text("❌ Metadata alınamadı.")
 
-        media_type = args.get("media_type")
-        tmdb_id = int(args.get("tmdb_id", 0))
-        db_index = int(args.get("db_index", 1))  # Opsiyonel
+    # Hangi koleksiyona kaydedilecek?
+    collection = movie_col if meta["media_type"] == "movie" else series_col
+    await collection.insert_one(meta)
+    await message.reply_text(f"✅ {meta['title']} veritabanına eklendi.")
 
-        if media_type == "movie":
-            success = await db.delete_document("Movie", tmdb_id, db_index)
-            await message.reply(f"{'✅ Silindi' if success else '❌ Bulunamadı'}: Movie tmdb_id={tmdb_id}")
+# ------------ /sil Komutu ------------
+@Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
+async def request_delete(client, message):
+    user_id = message.from_user.id
+    await message.reply_text(
+        "⚠️ Tüm veriler silinecek!\n"
+        "Onaylamak için **Evet**, iptal etmek için **Hayır** yazın.\n"
+        "⏱ 60 saniye içinde cevap vermezsen işlem otomatik iptal edilir."
+    )
 
-        elif media_type == "tv":
-            season_number = int(args.get("season_number")) if "season_number" in args else None
-            episode_number = int(args.get("episode_number")) if "episode_number" in args else None
-            id = args.get("id")
+    if user_id in awaiting_confirmation:
+        awaiting_confirmation[user_id].cancel()
 
-            if id and season_number and episode_number:
-                success = await db.delete_tv_quality(tmdb_id, db_index, season_number, episode_number, id)
-                msg = f"{'✅ Silindi' if success else '❌ Bulunamadı'}: TV episode quality"
-            elif season_number and episode_number:
-                success = await db.delete_tv_episode(tmdb_id, db_index, season_number, episode_number)
-                msg = f"{'✅ Silindi' if success else '❌ Bulunamadı'}: TV episode"
-            elif season_number:
-                success = await db.delete_tv_season(tmdb_id, db_index, season_number)
-                msg = f"{'✅ Silindi' if success else '❌ Bulunamadı'}: TV season"
-            else:
-                success = await db.delete_document("TV", tmdb_id, db_index)
-                msg = f"{'✅ Silindi' if success else '❌ Bulunamadı'}: TV show"
+    async def timeout():
+        await asyncio.sleep(60)
+        if user_id in awaiting_confirmation:
+            awaiting_confirmation.pop(user_id, None)
+            await message.reply_text("⏰ Zaman doldu, silme işlemi otomatik olarak iptal edildi.")
 
-            await message.reply(msg)
+    task = asyncio.create_task(timeout())
+    awaiting_confirmation[user_id] = task
 
-        else:
-            await message.reply("❌ media_type belirtilmemiş veya geçersiz.")
+# ------------ "Evet" veya "Hayır" Mesajı ------------
+@Client.on_message(filters.private & CustomFilters.owner & filters.text)
+async def handle_confirmation(client, message):
+    user_id = message.from_user.id
+    if user_id not in awaiting_confirmation:
+        return
 
-    except Exception as e:
-        LOGGER.error(f"/sil komut hatası: {e}")
-        await message.reply(f"❌ Hata oluştu: {e}")
+    text = message.text.strip().lower()
+    awaiting_confirmation[user_id].cancel()
+    awaiting_confirmation.pop(user_id, None)
+
+    if text == "evet":
+        await message.reply_text("🗑️ Silme işlemi başlatılıyor...")
+        await init_db()
+
+        movie_count = await movie_col.count_documents({})
+        series_count = await series_col.count_documents({})
+
+        await movie_col.delete_many({})
+        await series_col.delete_many({})
+
+        await message.reply_text(
+            f"✅ Silme işlemi tamamlandı.\n\n"
+            f"📌 Filmler silindi: {movie_count}\n"
+            f"📌 Diziler silindi: {series_count}"
+        )
+
+    elif text == "hayır":
+        await message.reply_text("❌ Silme işlemi iptal edildi.")
