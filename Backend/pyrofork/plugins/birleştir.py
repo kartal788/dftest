@@ -3,16 +3,12 @@ from pyrogram.types import Message
 from Backend.helper.custom_filter import CustomFilters
 import os
 import asyncio
-import json
 import PTN
 from time import time
 from Backend.helper.encrypt import encode_string
 from Backend.logger import LOGGER
 from themoviedb import aioTMDb
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import MongoClient
-import tempfile
-import traceback
 
 # ----------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
@@ -156,41 +152,3 @@ async def handle_confirmation(client: Client, message: Message):
         )
     elif text == "hayır":
         await message.reply_text("❌ Silme işlemi iptal edildi.")
-
-# ----------------- /vindir Komutu -----------------
-def export_collections_to_json(url, db_name):
-    client = MongoClient(url)
-    db = client[db_name]
-    movie_data = list(db["movie"].find({}, {"_id": 0}))
-    tv_data = list(db["tv"].find({}, {"_id": 0}))
-    return {"movie": movie_data, "tv": tv_data}
-
-@Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
-async def download_collections(client: Client, message: Message):
-    user_id = message.from_user.id
-    now = time()
-
-    if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
-        await message.reply_text(f"⚠️ Lütfen {flood_wait} saniye bekleyin.", quote=True)
-        return
-    last_command_time[user_id] = now
-
-    try:
-        combined_data = export_collections_to_json(MONGO_URL, DB_NAME)
-        if combined_data is None:
-            await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
-            return
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
-            json.dump(combined_data, tmp, ensure_ascii=False, indent=2, default=str)
-            file_path = tmp.name
-
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=file_path,
-            caption="📁 Film ve Dizi Koleksiyonları"
-        )
-
-    except Exception as e:
-        print(traceback.format_exc())
-        await message.reply_text(f"⚠️ Hata: {e}")
