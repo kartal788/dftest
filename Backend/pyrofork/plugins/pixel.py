@@ -15,7 +15,7 @@ load_dotenv()
 
 PIXELDRAIN_API_KEY = os.getenv("PIXELDRAIN")
 API_BASE = "https://pixeldrain.com/api"
-CMD_FLOOD_WAIT = 60
+CMD_FLOOD_WAIT = 5
 
 last_command_time = {}
 delete_waiting = {}  # user_id: timestamp
