@@ -7,13 +7,8 @@ import PTN
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
-
 from pymongo import MongoClient
 from themoviedb import aioTMDb
-
-from Backend.helper.custom_filter import CustomFilters
-from Backend.helper.encrypt import encode_string
-from Backend.logger import LOGGER
 
 # ================= ENV =================
 DATABASE_RAW = os.getenv("DATABASE", "")
@@ -31,7 +26,6 @@ movie_col = None
 series_col = None
 
 def init_db():
-    """MongoDB bağlantısını başlat"""
     global db, movie_col, series_col
     if db is not None:
         return
@@ -51,19 +45,8 @@ awaiting_confirmation = {}
 last_command_time = {}
 flood_wait = 30
 
-# ================= HATA DOSYASI =================
-async def send_error_file(client: Client, chat_id: int, error: Exception):
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-            f.write(str(error))
-            error_file = f.name
-        await client.send_document(chat_id=chat_id, document=error_file, caption="⚠️ Hata oluştu")
-        os.remove(error_file)
-    except Exception:
-        LOGGER.exception("Hata dosyası gönderilemedi")
-
 # ================= /EKLE =================
-@Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
+@Client.on_message(filters.command("ekle") & filters.private)
 async def add_file(client: Client, message: Message):
     try:
         init_db()
@@ -73,13 +56,7 @@ async def add_file(client: Client, message: Message):
 
         url = message.command[1]
         filename = " ".join(message.command[2:])
-
-        try:
-            parsed = PTN.parse(filename)
-        except Exception as e:
-            await message.reply_text(f"Dosya adı ayrıştırılamadı:\n{e}")
-            return
-
+        parsed = PTN.parse(filename)
         title = parsed.get("title")
         season = parsed.get("season")
         episode = parsed.get("episode")
@@ -90,23 +67,13 @@ async def add_file(client: Client, message: Message):
             await message.reply_text("Başlık bulunamadı.")
             return
 
-        try:
-            encoded_string = await encode_string({"chat_id": message.chat.id, "msg_id": message.id})
-        except Exception:
-            encoded_string = None
-
         async with API_SEMAPHORE:
             if season and episode:
                 results = await tmdb.search().tv(query=title)
             else:
                 results = await tmdb.search().movies(query=title, year=year)
 
-        if not results:
-            await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
-            return
-
-        meta = results[0]
-
+        meta = results[0] if results else None
         record = {
             "title": title,
             "season": season,
@@ -114,21 +81,19 @@ async def add_file(client: Client, message: Message):
             "year": year,
             "quality": quality,
             "url": url,
-            "tmdb_id": getattr(meta, "id", None),
-            "description": getattr(meta, "overview", ""),
-            "encoded_string": encoded_string
+            "tmdb_id": getattr(meta, "id", None) if meta else None,
+            "description": getattr(meta, "overview", "") if meta else "",
         }
 
         collection = series_col if season else movie_col
-        collection.insert_one(record)  # pymongo senkron
+        collection.insert_one(record)
         await message.reply_text(f"✅ **{title}** eklendi.")
 
     except Exception as e:
-        LOGGER.exception("ekle hatası")
-        await send_error_file(client, message.chat.id, e)
+        await message.reply_text(f"❌ Hata: {e}")
 
 # ================= /SIL =================
-@Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
+@Client.on_message(filters.command("sil") & filters.private)
 async def request_delete(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -151,10 +116,9 @@ async def request_delete(client: Client, message: Message):
         awaiting_confirmation[user_id] = asyncio.create_task(timeout())
 
     except Exception as e:
-        LOGGER.exception("sil hatası")
-        await send_error_file(client, message.chat.id, e)
+        await message.reply_text(f"❌ Hata: {e}")
 
-@Client.on_message(filters.private & CustomFilters.owner & filters.text)
+@Client.on_message(filters.private & filters.text)
 async def handle_delete_confirmation(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -180,11 +144,10 @@ async def handle_delete_confirmation(client: Client, message: Message):
             await message.reply_text("❌ Silme iptal edildi.")
 
     except Exception as e:
-        LOGGER.exception("sil onay hatası")
-        await send_error_file(client, message.chat.id, e)
+        await message.reply_text(f"❌ Hata: {e}")
 
 # ================= /VINDIR =================
-@Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
+@Client.on_message(filters.command("vindir") & filters.private)
 async def download_collections(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -206,13 +169,16 @@ async def download_collections(client: Client, message: Message):
 
         data = {"movie": movie_data, "tv": tv_data}
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
-            json.dump(data, tmp, ensure_ascii=False, indent=2, default=str)
-            file_path = tmp.name
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+                json.dump(data, tmp, ensure_ascii=False, indent=2, default=str)
+                tmp_path = tmp.name
 
-        await client.send_document(chat_id=message.chat.id, document=file_path, caption="📁 Film ve Dizi Veritabanı")
-        os.remove(file_path)
+            await client.send_document(chat_id=message.chat.id, document=tmp_path, caption="📁 Film ve Dizi Veritabanı")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     except Exception as e:
-        LOGGER.exception("vindir hatası")
-        await send_error_file(client, message.chat.id, e)
+        await message.reply_text(f"❌ Hata: {e}")
