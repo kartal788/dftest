@@ -154,31 +154,43 @@ async def download_collections(client: Client, message: Message):
         now = time.time()
         if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
             wait = flood_wait - (now - last_command_time[user_id])
-            await message.reply_text(f"⚠️ {wait:.1f} saniye bekleyin.")
+            await message.reply_text(f"⚠️ Lütfen {wait:.1f} saniye bekleyin.")
             return
 
         last_command_time[user_id] = now
         init_db()
 
-        movie_data = list(movie_col.find({}, {"_id": 0}))
-        tv_data = list(series_col.find({}, {"_id": 0}))
+        if movie_col is None or series_col is None:
+            await message.reply_text("❌ Veritabanı koleksiyonları bulunamadı.")
+            return
 
-        if not movie_data and not tv_data:
+        # MongoDB'den verileri çek
+        movies = list(movie_col.find({}, {"_id": 0}))
+        tv_shows = list(series_col.find({}, {"_id": 0}))
+
+        if not movies and not tv_shows:
             await message.reply_text("⚠️ Koleksiyonlar boş.")
             return
 
-        data = {"movie": movie_data, "tv": tv_data}
+        data = {
+            "movie": movies,
+            "tv": tv_shows
+        }
 
-        tmp_path = None
+        # Geçici JSON dosyası oluştur
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
-                json.dump(data, tmp, ensure_ascii=False, indent=2, default=str)
-                tmp_path = tmp.name
-
-            await client.send_document(chat_id=message.chat.id, document=tmp_path, caption="📁 Film ve Dizi Veritabanı")
+            json.dump(data, tmp_file, ensure_ascii=False, indent=2, default=str)
+            tmp_file.close()
+            await client.send_document(
+                chat_id=message.chat.id,
+                document=tmp_file.name,
+                caption="📁 Film ve Dizi Veritabanı"
+            )
         finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
+            if os.path.exists(tmp_file.name):
+                os.remove(tmp_file.name)
 
     except Exception as e:
         await message.reply_text(f"❌ Hata: {e}")
+
