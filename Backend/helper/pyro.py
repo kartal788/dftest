@@ -145,7 +145,8 @@ async def restart_notification():
 commands = [
 BotCommand("start", "🚀 Botu başlat."),
 BotCommand("ekle", "⭐ Link ile film/dizi ekle."),
-BotCommand("pixeldrain", "⭐ pixeldrain videoları sil."),
+BotCommand("pixeldrain", "⭐ Pixeldrain istatistiği."),
+BotCommand("pixeldrainsil", "⭐ Pixeldrain videolarını sil."),
 BotCommand("istatistik", "📊 Bot istatistiklerini görüntüle."),
 BotCommand("cevir", "🇹🇷 Açıklamaları Türkçeye çevir."),
 BotCommand("tur", "⭐ Türleri Türkçeye çevir."),
