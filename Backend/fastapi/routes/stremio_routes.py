@@ -305,7 +305,7 @@ async def get_streams(media_type: str, id: str):
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
-                "url": f"{BASE_URL}/dl/{quality.get('id')}/video.mkv"
+                "url": quality.get("id")
             })
 
     streams.sort(key=lambda s: get_resolution_priority(s.get("name", "")), reverse=True)
