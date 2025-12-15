@@ -214,9 +214,9 @@ async def cevir(client: Client, message: Message):
                         await start_msg.edit_text(
                             (
                                 f"🇹🇷 Türkçe çeviri hazırlanıyor...\n\n"
-                                f"Toplam: {total_to_translate} (🎬 {movies_to_translate} | 📺 {episodes_to_translate})\n"
-                                f"Çevrilen: 🎬 {translated_movies} | 📺 {translated_episodes}\n"
-                                f"Kalan: 🎬 {movies_to_translate - translated_movies} | 📺 {episodes_to_translate - translated_episodes}\n"
+                                f"Toplam: {total_to_translate} (Film {movies_to_translate} | Bölüm {episodes_to_translate})\n"
+                                f"Çevrilen: Film {translated_movies} | Bölüm {translated_episodes}\n"
+                                f"Kalan: Film {movies_to_translate - translated_movies} | Bölüm {episodes_to_translate - translated_episodes}\n"
                                 f"Hatalı: {error_count}\n"
                                 f"{progress_bar(translated_movies + translated_episodes, total_to_translate)}\n\n"
                                 f"Süre: `{elapsed_str}` (`{eta_str}`)"
@@ -239,9 +239,9 @@ async def cevir(client: Client, message: Message):
     await start_msg.edit_text(
         (
             "📊 **Genel Özet**\n\n"
-            f"Toplam: {total_to_translate} (🎬 {movies_to_translate} | 📺 {episodes_to_translate})\n"
-            f"Çevrilen: 🎬 {translated_movies} | 📺 {translated_episodes}\n"
-            f"Kalan: 🎬 {movies_to_translate - translated_movies} | 📺 {episodes_to_translate - translated_episodes}\n"
+            f"Toplam: {total_to_translate} (Film {movies_to_translate} | Bölüm {episodes_to_translate})\n"
+            f"Çevrilen: Film {translated_movies} | Bölüm {translated_episodes}\n"
+            f"Kalan: Film {movies_to_translate - translated_movies} | Bölüm {episodes_to_translate - translated_episodes}\n"
             f"Hatalı: {error_count}\n"
             f"Süre: {duration_str}"
         ),
