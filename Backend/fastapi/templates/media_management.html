@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 
-{% block title %}Media Management - Telegram Stremio{% endblock %}
+{% block title %}Medya Yönetimi{% endblock %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Header -->
     <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-            <h1 class="text-3xl font-bold">Media Management</h1>
-            <p class="theme-text-secondary mt-2">Manage your movie and TV show collections</p>
+            <h1 class="text-3xl font-bold">Medya Yönetimi</h1>
+            <p class="theme-text-secondary mt-2">Film ve dizi koleksiyonlarınızı yönetin</p>
         </div>
         
         <div class="flex space-x-2">
             <a href="/media/manage?media_type=movie" 
                class="px-4 py-2 rounded-md transition-colors text-sm font-medium {% if media_type == 'movie' %}theme-primary text-white{% else %}theme-card border hover:bg-gray-50{% endif %}">
-                Movies
+                Filmler
             </a>
             <a href="/media/manage?media_type=tv" 
                class="px-4 py-2 rounded-md transition-colors text-sm font-medium {% if media_type == 'tv' %}theme-primary text-white{% else %}theme-card border hover:bg-gray-50{% endif %}">
-                TV Shows
+                Diziler
             </a>
         </div>
     </div>
@@ -33,11 +33,11 @@
             <div class="flex gap-2">
                 <button onclick="searchMedia()" 
                         class="theme-primary text-white px-6 py-2 rounded-md hover:opacity-90 transition-opacity text-sm font-medium">
-                    Search
+                    Ara
                 </button>
                 <button onclick="clearSearch()" 
                         class="border border-gray-300 px-6 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium">
-                    Clear
+                    Sil
                 </button>
             </div>
         </div>
@@ -46,7 +46,7 @@
     <!-- Loading Indicator -->
     <div id="loading" class="text-center py-12 hidden">
         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-        <p class="theme-text-secondary">Loading {{ media_type }}s...</p>
+        <p class="theme-text-secondary">Yükleniyor {{ media_type }}s...</p>
     </div>
     
     <!-- Error Display -->
@@ -56,12 +56,12 @@
                 <svg class="h-6 w-6 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.996-.833-2.764 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
-                <h3 class="text-lg font-semibold text-red-700">Error Loading Media</h3>
+                <h3 class="text-lg font-semibold text-red-700">Medya Yükleme Hatası</h3>
             </div>
             <p id="error-message" class="text-red-600 mb-4"></p>
             <button onclick="retryLoad()" 
                     class="theme-primary text-white px-4 py-2 rounded-md hover:opacity-90 transition-opacity text-sm">
-                Try Again
+                Tekrar deneyin
             </button>
         </div>
     </div>
@@ -80,9 +80,9 @@
             <h3 class="text-lg font-semibold theme-text-secondary mb-2">No {{ media_type }}s found</h3>
             <p class="theme-text-secondary text-sm mb-4">
                 {% if media_type == 'movie' %}
-                No movies match your search criteria
+                Arama kriterlerinize uygun film bulunamadı
                 {% else %}
-                No TV shows match your search criteria
+               Arama kriterlerinize uygun dizi bulunamadı
                 {% endif %}
             </p>
             <button onclick="clearSearch()" 
@@ -235,11 +235,11 @@ function createMediaCard(item) {
                 <div class="flex justify-between items-center">
                     <a href="/media/edit?tmdb_id=${item.tmdb_id}&db_index=${item.db_index}&media_type=${mediaType}" 
                        class="text-primary hover:underline text-xs font-medium px-2 py-1 rounded transition-colors hover:bg-blue-50">
-                        Edit
+                        Düzenle
                     </a>
                     <button onclick="deleteMedia(${item.tmdb_id}, ${item.db_index}, '${title.replace(/'/g, "\\'")}')" 
                             class="text-red-600 hover:underline text-xs font-medium px-2 py-1 rounded transition-colors hover:bg-red-50">
-                        Delete
+                        Sil
                     </button>
                 </div>
             </div>
@@ -264,7 +264,7 @@ function updatePagination(currentPage, totalPages) {
         paginationHTML += `
             <button onclick="loadMedia(${currentPage - 1}, '${currentSearch}')" 
                     class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                Previous
+                Önceki
             </button>
         `;
     }
@@ -317,7 +317,7 @@ function updatePagination(currentPage, totalPages) {
         paginationHTML += `
             <button onclick="loadMedia(${currentPage + 1}, '${currentSearch}')" 
                     class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                Next
+                Sonraki
             </button>
         `;
     }
@@ -337,7 +337,7 @@ function updateMediaInfo(data) {
     resultsInfo.textContent = `Showing ${startItem}-${endItem} of ${data.total_count} ${mediaType}s`;
     
     if (data.databases_checked && data.databases_checked.length > 0) {
-        dbInfo.textContent = `Database${data.databases_checked.length > 1 ? 's' : ''}: ${data.databases_checked.join(', ')}`;
+        dbInfo.textContent = `Veritabanı${data.databases_checked.length > 1 ? 's' : ''}: ${data.databases_checked.join(', ')}`;
     }
     
     mediaInfo.classList.remove('hidden');
@@ -363,7 +363,7 @@ function retryLoad() {
 
 // Delete media with confirmation
 async function deleteMedia(tmdbId, dbIndex, title) {
-    if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis action cannot be undone.`)) return;
+    if (!confirm(`"${title} silmek istediğinizden emin misiniz?"\n\nBu işlem geri alınamaz.`)) return;
     
     try {
         const response = await fetch(`/api/media/delete?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
@@ -379,7 +379,7 @@ async function deleteMedia(tmdbId, dbIndex, title) {
             // Show success message briefly
             const successMsg = document.createElement('div');
             successMsg.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
-            successMsg.textContent = `"${title}" deleted successfully`;
+            successMsg.textContent = `"${title}" başarıyla silindi.`;
             document.body.appendChild(successMsg);
             
             setTimeout(() => {
