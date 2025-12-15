@@ -2,23 +2,49 @@ from pyrogram import Client, filters
 from Backend.helper.custom_filter import CustomFilters
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+from urllib.parse import quote_plus
 import os
 import asyncio
 import requests
 from datetime import datetime
 
+# -------------------- .env yükle --------------------
 load_dotenv()
 TMDB_API = os.getenv("TMDB_API")
-MONGO_URL = os.getenv("DATABASE")  # veya DATABASE listesinden seçebilirsiniz
+DATABASE_RAW = os.getenv("DATABASE", "")
 
+# -------------------- MongoDB Bağlantısı --------------------
+db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip()]
+
+if len(db_urls) < 2:
+    raise Exception("İkinci DATABASE bulunamadı!")
+
+raw_mongo_url = db_urls[1]  # İkinci DB (storage)
+
+def encode_mongo_uri(uri):
+    if "@" not in uri:
+        return uri
+    prefix, rest = uri.split("://", 1)
+    creds, host = rest.split("@", 1)
+    if ":" in creds:
+        user, password = creds.split(":", 1)
+        user = quote_plus(user)
+        password = quote_plus(password)
+        return f"{prefix}://{user}:{password}@{host}"
+    return uri
+
+MONGO_URL = encode_mongo_uri(raw_mongo_url)
 client_db = AsyncIOMotorClient(MONGO_URL)
 db = client_db.get_database()
 movie_col = db["movie"]
 series_col = db["tv"]
 
+print("✅ Storage DB bağlantısı başarıyla kuruldu.")
+
+# -------------------- Onay Bekleyen Kullanıcı --------------------
 awaiting_confirmation = {}  # user_id -> asyncio.Task
 
-# ------------------- TMDb'den veri çek -------------------
+# -------------------- TMDb'den Veri Çek --------------------
 async def fetch_tmdb(tmdb_id, media_type="movie"):
     url = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}?api_key={TMDB_API}&language=en-US"
     r = requests.get(url)
@@ -45,7 +71,7 @@ async def fetch_tmdb(tmdb_id, media_type="movie"):
     }
     return item
 
-# ------------------- /ekle Komutu -------------------
+# -------------------- /ekle Komutu --------------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_link(client, message):
     if len(message.command) < 3:
@@ -54,7 +80,6 @@ async def add_link(client, message):
     link = message.command[1]
     tmdb_id = message.command[2]
 
-    # TMDb'den veri çek
     media_item = await fetch_tmdb(tmdb_id)
     if not media_item:
         return await message.reply_text("❌ TMDb verisi bulunamadı.")
@@ -67,13 +92,12 @@ async def add_link(client, message):
         "size": "Unknown"
     })
 
-    # Movie veya TV'ye ekle
     collection = movie_col if media_item["media_type"] == "movie" else series_col
     await collection.insert_one(media_item)
 
     await message.reply_text(f"✅ {media_item['title']} veritabanına eklendi.")
 
-# ------------------- /sil Komutu -------------------
+# -------------------- /sil Komutu --------------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def request_delete(client, message):
     user_id = message.from_user.id
@@ -95,7 +119,7 @@ async def request_delete(client, message):
     task = asyncio.create_task(timeout())
     awaiting_confirmation[user_id] = task
 
-# ------------------- Onay Mesajı -------------------
+# -------------------- Onay Mesajı --------------------
 @Client.on_message(filters.private & CustomFilters.owner & filters.text)
 async def handle_confirmation(client, message):
     user_id = message.from_user.id
