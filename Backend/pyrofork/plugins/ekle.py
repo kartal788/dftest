@@ -35,19 +35,18 @@ async def add_link(client, message):
     link = message.command[1]
     await init_db()
 
-    deleted_ids = []
+    updated_count = 0
 
     # --- MOVIE Koleksiyonunu Güncelle ---
     async for movie in movie_col.find({}):
         updated = False
         for telegram_item in movie.get("telegram", []):
             if "id" in telegram_item:
-                deleted_ids.append(telegram_item["id"])
-                telegram_item.pop("id")
-                telegram_item["link"] = link
+                telegram_item["id"] = link  # burada id'yi link ile değiştiriyoruz
                 updated = True
         if updated:
             await movie_col.update_one({"_id": movie["_id"]}, {"$set": movie})
+            updated_count += 1
 
     # --- TV Koleksiyonunu Güncelle ---
     async for tv_show in series_col.find({}):
@@ -56,17 +55,11 @@ async def add_link(client, message):
             for episode in season.get("episodes", []):
                 for telegram_item in episode.get("telegram", []):
                     if "id" in telegram_item:
-                        deleted_ids.append(telegram_item["id"])
-                        telegram_item.pop("id")
-                        telegram_item["link"] = link
+                        telegram_item["id"] = link  # burada da id'yi link ile değiştiriyoruz
                         updated = True
         if updated:
             await series_col.update_one({"_id": tv_show["_id"]}, {"$set": tv_show})
+            updated_count += 1
 
-    # --- Silinen ID’leri logla ---
-    if deleted_ids:
-        with open("deleted_ids.txt", "a", encoding="utf-8") as f:
-            for _id in deleted_ids:
-                f.write(_id + "\n")
+    await message.reply_text(f"✅ Link güncellendi. Toplam {updated_count} kayıtta id değiştirildi.")
 
-    await message.reply_text(f"✅ Link eklendi. Toplam {len(deleted_ids)} id silindi ve kaydedildi.")
