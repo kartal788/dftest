@@ -27,45 +27,53 @@ async def init_db():
     movie_col = db["movie"]
     series_col = db["tv"]
 
+# ------------ Onay Bekleyen Kullanıcıları Sakla ------------
+awaiting_confirmation = {}  # user_id -> asyncio.Task
+
+# ------------ Yardımcı Fonksiyon: Pixeldrain Dosya Adı ------------
+async def get_pixeldrain_file_name(link):
+    """
+    Pixeldrain /u/<id> linkini /api/file/<id> formatına çevirip dosya adını çek.
+    """
+    if "pixeldrain.com/u/" in link:
+        link = link.replace("/u/", "/api/file/")
+    file_name = "unknown_file"
+    if "/api/file/" in link:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(link) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        file_name = data.get("name", "unknown_file")
+        except Exception:
+            pass
+    return link, file_name
+
 # ------------ /ekle Komutu ------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file_link(client, message):
     if len(message.command) < 2:
         return await message.reply_text("❌ Lütfen bir link girin. Örnek: /ekle <link>")
 
-    link = message.command[1]
-
-    # Pixeldrain linkini API formatına çevir
-    if "pixeldrain.com/u/" in link:
-        link = link.replace("/u/", "/api/file/")
-
-    # Dosya adını almak için Pixeldrain API kullan
-    file_name = "unknown_file"
-    if "pixeldrain.com/api/file/" in link:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(link) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    file_name = data.get("name", "unknown_file")
+    raw_link = message.command[1]
+    link, file_name = await get_pixeldrain_file_name(raw_link)
 
     await init_db()
     await message.reply_text(f"⏳ `{file_name}` için metadata çekiliyor...", quote=True)
 
     try:
-        # Metadata helper ile bilgileri çek
         meta = await metadata(file_name, channel=message.chat.id, msg_id=message.message_id)
         if not meta:
             return await message.reply_text(f"❌ Metadata alınamadı: `{file_name}`")
 
-        # Telegram bilgisi ekle
-        size = "Unknown"
         tg_item = {
             "quality": meta.get("quality") or "Unknown",
             "id": link,
             "name": file_name,
-            "size": size
+            "size": "Unknown"
         }
 
+        # Film ekleme/güncelleme
         if meta.get("media_type") == "movie":
             existing = await movie_col.find_one({"imdb_id": meta["imdb_id"]})
             if existing:
@@ -79,6 +87,7 @@ async def add_file_link(client, message):
                 await movie_col.insert_one(meta)
                 await message.reply_text(f"✅ Film başarıyla eklendi: `{file_name}`")
 
+        # Dizi ekleme/güncelleme
         elif meta.get("media_type") == "tv":
             season_number = meta.get("season_number") or 1
             episode_number = meta.get("episode_number") or 1
@@ -121,3 +130,60 @@ async def add_file_link(client, message):
 
     except Exception as e:
         await message.reply_text(f"❌ Hata oluştu: `{str(e)}`")
+
+# ------------ /sil Komutu ------------
+@Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
+async def request_delete(client, message):
+    user_id = message.from_user.id
+    await message.reply_text(
+        "⚠️ Tüm veriler silinecek!\n"
+        "Onaylamak için **Evet**, iptal etmek için **Hayır** yazın.\n"
+        "⏱ 60 saniye içinde cevap vermezsen işlem otomatik iptal edilir."
+    )
+
+    if user_id in awaiting_confirmation:
+        try:
+            awaiting_confirmation[user_id].cancel()
+        except Exception:
+            pass
+
+    async def timeout():
+        try:
+            await asyncio.sleep(60)
+            if user_id in awaiting_confirmation:
+                awaiting_confirmation.pop(user_id, None)
+                await message.reply_text("⏰ Zaman doldu, silme işlemi iptal edildi.")
+        except asyncio.CancelledError:
+            pass
+
+    task = asyncio.create_task(timeout())
+    awaiting_confirmation[user_id] = task
+
+# ------------ Onay Mesajı: Evet / Hayır ------------
+@Client.on_message(filters.private & CustomFilters.owner & filters.text)
+async def handle_confirmation(client, message):
+    user_id = message.from_user.id
+    if user_id not in awaiting_confirmation:
+        return
+
+    text = message.text.strip().lower()
+    awaiting_confirmation[user_id].cancel()
+    awaiting_confirmation.pop(user_id, None)
+
+    if text == "evet":
+        await message.reply_text("🗑️ Silme işlemi başlatılıyor...")
+        await init_db()
+
+        movie_count = await movie_col.count_documents({})
+        series_count = await series_col.count_documents({})
+
+        await movie_col.delete_many({})
+        await series_col.delete_many({})
+
+        await message.reply_text(
+            f"✅ Silme işlemi tamamlandı.\n\n"
+            f"📌 Filmler silindi: {movie_count}\n"
+            f"📌 Diziler silindi: {series_count}"
+        )
+    elif text == "hayır":
+        await message.reply_text("❌ Silme işlemi iptal edildi.")
