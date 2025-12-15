@@ -4,9 +4,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
 import PTN
+from datetime import datetime
 from Backend.helper.encrypt import encode_string
 from Backend.logger import LOGGER
-from themoviedb import aioTMDb
+from Backend.metadata import metadata  # sizin verdiğiniz metadata fonksiyonu
 
 # ------------ ENV'DEN AL ------------
 db_raw = os.getenv("DATABASE", "")
@@ -29,9 +30,6 @@ async def init_db():
     movie_col = db["movie"]
     series_col = db["tv"]
 
-tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
-API_SEMAPHORE = asyncio.Semaphore(12)
-
 # ------------ Onay Bekleyen Kullanıcıları Sakla ------------
 awaiting_confirmation = {}  # user_id -> asyncio.Task
 
@@ -53,52 +51,66 @@ async def add_file(client, message):
         await message.reply_text(f"Dosya adı ayrıştırılamadı: {e}")
         return
 
-    title = parsed.get("title")
-    season = parsed.get("season")
-    episode = parsed.get("episode")
-    year = parsed.get("year")
-    quality = parsed.get("resolution")
-
-    if not title:
-        await message.reply_text("Başlık bulunamadı, lütfen doğru bir dosya adı girin.")
+    # Metadata çek
+    meta = await metadata(filename, message.chat.id, message.id)
+    if not meta:
+        await message.reply_text("Metadata çekilemedi.")
         return
 
-    # Metadata encode
-    data = {"chat_id": message.chat.id, "msg_id": message.id}
-    try:
-        encoded_string = await encode_string(data)
-    except Exception:
-        encoded_string = None
-
-    # TMDb search
-    async with API_SEMAPHORE:
-        if season and episode:
-            tmdb_search = await tmdb.search().tv(query=title)
-        else:
-            tmdb_search = await tmdb.search().movies(query=title, year=year)
-
-    if not tmdb_search:
-        await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
-        return
-
-    metadata = tmdb_search[0]  # ilk sonucu alıyoruz
-
-    # MongoDB kaydı
+    # MongoDB kaydı hazırla
     record = {
-        "title": title,
-        "season": season,
-        "episode": episode,
-        "year": year,
-        "quality": quality,
-        "url": url,
-        "tmdb_id": getattr(metadata, "id", None),
-        "description": getattr(metadata, "overview", ""),
-        "encoded_string": encoded_string
+        "tmdb_id": meta.get("tmdb_id"),
+        "imdb_id": meta.get("imdb_id"),
+        "db_index": 1,
+        "title": meta.get("title"),
+        "genres": meta.get("genres", []),
+        "description": meta.get("description"),
+        "rating": meta.get("rate"),
+        "release_year": meta.get("year"),
+        "poster": meta.get("poster"),
+        "backdrop": meta.get("backdrop"),
+        "logo": meta.get("logo"),
+        "cast": meta.get("cast", []),
+        "runtime": meta.get("runtime"),
+        "media_type": meta.get("media_type"),
+        "updated_on": datetime.utcnow(),
+        "telegram": [
+            {
+                "quality": meta.get("quality"),
+                "id": url,
+                "name": filename,
+                "size": "bilinmiyor"  # opsiyonel: gerçek boyut eklenebilir
+            }
+        ]
     }
 
-    collection = series_col if season else movie_col
-    await collection.insert_one(record)
-    await message.reply_text(f"✅ {title} başarıyla eklendi.")
+    # TV ise seasons/episodes yapısı ekle
+    if meta.get("media_type") == "tv":
+        record["seasons"] = [
+            {
+                "season_number": meta.get("season_number"),
+                "episodes": [
+                    {
+                        "episode_number": meta.get("episode_number"),
+                        "title": meta.get("episode_title"),
+                        "episode_backdrop": meta.get("episode_backdrop"),
+                        "overview": meta.get("episode_overview"),
+                        "released": meta.get("episode_released"),
+                        "telegram": record["telegram"]
+                    }
+                ]
+            }
+        ]
+
+    # MongoDB ekleme (upsert)
+    collection = series_col if meta.get("media_type") == "tv" else movie_col
+    await collection.update_one(
+        {"tmdb_id": record["tmdb_id"]},
+        {"$setOnInsert": record, "$push": {"telegram": record["telegram"][0]}},
+        upsert=True
+    )
+
+    await message.reply_text(f"✅ {meta.get('title')} başarıyla eklendi.")
 
 # ------------ /sil Komutu ------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
