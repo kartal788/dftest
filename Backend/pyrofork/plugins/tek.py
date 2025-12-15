@@ -7,7 +7,6 @@ from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
-from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
@@ -16,7 +15,7 @@ db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip()
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
 
-MONGO_URL = db_urls[1]  # İkinci database
+MONGO_URL = db_urls[1]  # İkinci database'e bağlanacak
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -57,7 +56,6 @@ def pixeldrain_to_api(url: str) -> str:
     return url
 
 def safe_getattr(obj, attr, default=None):
-    """Objeden güvenli şekilde attribute alır, yoksa default döner."""
     return getattr(obj, attr, default) or default
 
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
@@ -66,6 +64,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
     release_year = get_year(release_date)
     genres = [g.name for g in safe_getattr(details, "genres", [])]
     cast = [c.name for c in safe_getattr(details, "cast", [])[:5]]
+    poster_id = safe_getattr(metadata, "imdb_id", "")
     poster = safe_getattr(metadata, "poster_path", "")
     backdrop = safe_getattr(metadata, "backdrop_path", "")
     logo = safe_getattr(metadata, "logo", "")
@@ -82,9 +81,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://images.metahub.space/poster/small/{safe_getattr(metadata, 'imdb_id','')}/img",
-            "backdrop": f"https://images.metahub.space/background/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
-            "logo": f"https://images.metahub.space/logo/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "poster": f"https://images.metahub.space/poster/small/{poster_id}/img",
+            "backdrop": f"https://images.metahub.space/background/medium/{poster_id}/img",
+            "logo": f"https://images.metahub.space/logo/medium/{poster_id}/img",
             "cast": cast,
             "runtime": runtime,
             "media_type": "movie",
@@ -96,10 +95,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "size": "UNKNOWN"
             }],
         }
-    else:  # TV series
+    else:  # TV
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
-
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -109,9 +107,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://images.metahub.space/poster/small/{safe_getattr(metadata, 'imdb_id','')}/img",
-            "backdrop": f"https://images.metahub.space/background/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
-            "logo": f"https://images.metahub.space/logo/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "poster": f"https://images.metahub.space/poster/small/{poster_id}/img",
+            "backdrop": f"https://images.metahub.space/background/medium/{poster_id}/img",
+            "logo": f"https://images.metahub.space/logo/medium/{poster_id}/img",
             "cast": cast,
             "runtime": runtime,
             "media_type": "tv",
@@ -176,7 +174,7 @@ async def add_file(client: Client, message: Message):
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
 
-    # Tek bir dokümanda movie ve tv listeleri
+    # Tek doküman içinde movie ve tv listeleri
     media_doc = await db["media"].find_one({"_id": 1})
     if not media_doc:
         media_doc = {"_id": 1, "movie": [], "tv": []}
