@@ -15,7 +15,7 @@ db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip()
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
 
-MONGO_URL = db_urls[1]  # İkinci database
+MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -78,6 +78,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
             "title": title,
             "genres": genres,
             "description": safe_getattr(metadata, "overview", ""),
@@ -97,12 +98,14 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "size": "UNKNOWN"
             }],
         }
-    else:  # TV
+    else:  # TV series
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
+
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
             "title": title,
             "genres": genres,
             "description": safe_getattr(metadata, "overview", ""),
@@ -142,7 +145,6 @@ async def add_file(client: Client, message: Message):
 
     url = pixeldrain_to_api(message.command[1])
     filename = " ".join(message.command[2:])
-
     try:
         parsed = PTN.parse(filename)
     except Exception as e:
@@ -153,7 +155,7 @@ async def add_file(client: Client, message: Message):
     season = parsed.get("season")
     episode = parsed.get("episode")
     year = parsed.get("year")
-    quality = parsed.get("resolution")
+    quality = parsed.get("resolution") or "UNKNOWN"
 
     if not title:
         await message.reply_text("Başlık bulunamadı, lütfen doğru bir dosya adı girin.")
