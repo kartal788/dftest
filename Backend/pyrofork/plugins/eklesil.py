@@ -296,8 +296,11 @@ async def sil(client: Client, message: Message):
     uid = message.from_user.id
     awaiting_confirmation[uid] = True
     await message.reply_text(
-        "⚠️ **TÜM VERİLER SİLİNECEK!**\n"
-        "Onay için **Evet**, iptal için **Hayır** yaz."
+        "⚠️ **TÜM VERİLER SİLİNECEK!**\n\n"
+        "Onay için **Evet**, iptal için **Hayır** yaz.\n\n"
+        "📊 Silinecek veriler:\n"
+        f"🎬 Filmler: `{await movie_col.count_documents({})}`\n"
+        f"📺 Diziler: `{await series_col.count_documents({})}`"
     )
 
 
@@ -314,9 +317,17 @@ async def sil_onay(client: Client, message: Message):
     awaiting_confirmation.pop(uid)
 
     if message.text.lower() == "evet":
+        movie_count = await movie_col.count_documents({})
+        series_count = await series_col.count_documents({})
+
         await movie_col.delete_many({})
         await series_col.delete_many({})
-        await message.reply_text("✅ Tüm veriler silindi.")
+
+        await message.reply_text(
+            "✅ **Silme İşlemi Tamamlandı**\n\n"
+            f"🎬 Silinen Filmler: `{movie_count}`\n"
+            f"📺 Silinen Diziler: `{series_count}`\n"
+            f"🗑 Toplam: `{movie_count + series_count}`"
+        )
     else:
         await message.reply_text("❌ İşlem iptal edildi.")
-
