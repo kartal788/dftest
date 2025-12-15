@@ -37,11 +37,11 @@ def human_size(size):
         size /= 1024
 
 
-# ---------------- PIXELDRAIN FILE FETCH (FIXED) ----------------
+# ---------------- FETCH FILES (DEDUP FIX) ----------------
 
 def fetch_all_files_safe(max_pages=100):
     page = 1
-    files_by_id = {}  # 🔥 id -> file (tekilleştirme)
+    files_by_id = {}
 
     while page <= max_pages:
         r = requests.get(
@@ -53,22 +53,21 @@ def fetch_all_files_safe(max_pages=100):
         if r.status_code != 200:
             break
 
-        data = r.json()
-        files = data.get("files", [])
+        files = r.json().get("files", [])
         if not files:
             break
 
         for f in files:
             file_id = f.get("id")
             if file_id:
-                files_by_id[file_id] = f  # aynı ID tekrar gelirse overwrite eder
+                files_by_id[file_id] = f
 
         page += 1
 
     return list(files_by_id.values())
 
 
-# ---------------- SAFE TELEGRAM ACTIONS ----------------
+# ---------------- SAFE TELEGRAM ----------------
 
 async def safe_reply(message: Message, text: str):
     try:
@@ -102,9 +101,9 @@ async def pixeldrain_handler(client: Client, message: Message):
         return
 
     args = message.command[1:]
-    status = await safe_reply(message, "İşlem başlatıldı...")
+    status = await safe_reply(message, "📂 Dosyalar alınıyor...")
 
-    # 🔥 /pixeldrain sil
+    # 🗑️ SİLME ONAYI
     if args and args[0].lower() == "sil":
         delete_waiting[user_id] = time()
         await safe_edit(
@@ -116,19 +115,51 @@ async def pixeldrain_handler(client: Client, message: Message):
         )
         return
 
-    # 📊 Özet
+    # 📊 DOSYA LİSTESİ + ÖZET
     try:
         files = await asyncio.to_thread(fetch_all_files_safe)
         total_bytes = sum(f.get("size", 0) for f in files)
 
-        await safe_edit(
-            status,
-            "📊 **PixelDrain Özet**\n\n"
-            f"Toplam Dosya: {len(files)}\n"
-            f"Toplam Boyut: {human_size(total_bytes)}\n\n"
-            "🗑️ Tüm dosyaları silmek için:\n"
-            "`/pixeldrain sil`"
-        )
+        file_names = []
+        for f in files:
+            name = f.get("name") or "isimsiz_dosya"
+            file_names.append(name)
+
+        # 🔹 10 ve altı → mesaj
+        if len(file_names) <= 10:
+            file_list_text = "\n".join(f"• {n}" for n in file_names)
+            await safe_edit(
+                status,
+                "📊 **PixelDrain Özet**\n\n"
+                f"Toplam Dosya: {len(files)}\n"
+                f"Toplam Boyut: {human_size(total_bytes)}\n\n"
+                "**📁 Dosyalar:**\n"
+                f"{file_list_text}\n\n"
+                "🗑️ Tüm dosyaları silmek için:\n"
+                "`/pixeldrain sil`"
+            )
+
+        # 🔹 10’dan fazla → TXT
+        else:
+            txt_content = "\n".join(file_names)
+            txt_path = "dosyalar.txt"
+
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(txt_content)
+
+            await client.send_document(
+                chat_id=message.chat.id,
+                document=txt_path,
+                caption=(
+                    "📊 **PixelDrain Özet**\n\n"
+                    f"Toplam Dosya: {len(files)}\n"
+                    f"Toplam Boyut: {human_size(total_bytes)}\n\n"
+                    "📁 Dosya listesi ektedir.\n\n"
+                    "🗑️ Tüm dosyaları silmek için:\n"
+                    "`/pixeldrain sil`"
+                )
+            await status.delete()
+            os.remove(txt_path)
 
     except Exception as e:
         await safe_edit(status, "❌ Hata oluştu.")
@@ -145,7 +176,7 @@ async def pixeldrain_handler(client: Client, message: Message):
 )
 async def pixeldrain_confirm_message(client: Client, message: Message):
     user_id = message.from_user.id
-    text = message.text.strip().upper()
+    text = message.text.strip().lower()  # 🔥 case-insensitive
 
     if user_id not in delete_waiting:
         return
@@ -155,12 +186,12 @@ async def pixeldrain_confirm_message(client: Client, message: Message):
         await safe_reply(message, "⏱️ Süre doldu. Silme iptal edildi.")
         return
 
-    if text == "HAYIR":
+    if text == "hayır":
         delete_waiting.pop(user_id, None)
         await safe_reply(message, "❌ Silme iptal edildi.")
         return
 
-    if text == "EVET":
+    if text == "evet":
         delete_waiting.pop(user_id, None)
         status = await safe_reply(message, "🗑️ Dosyalar siliniyor...")
 
