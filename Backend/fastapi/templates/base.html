@@ -39,11 +39,10 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center space-x-4">
-                    <h1 class="text-2xl font-bold text-primary">Telegram Stremio</h1>
                     {% if current_user %}
                     <div class="hidden md:flex space-x-4">
-                        <a href="/" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Dashboard</a>
-                        <a href="/media/manage" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Media</a>
+                        <a href="/" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Ana Sayfa</a>
+                        <a href="/media/manage" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors">Medya Yönetimi</a>
                     </div>
                     {% endif %}
                 </div>
@@ -65,10 +64,8 @@
                     {% if current_user %}
                     <div class="flex items-center space-x-4">
                         <span class="text-sm theme-text-secondary">{{ current_user }}</span>
-                        <a href="/logout" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors">Logout</a>
+                        <a href="/logout" class="bg-red-600 text-white px-2 py-1 rounded-md hover:bg-red-700 transition-colors">Çıkış yap</a>
                     </div>
-                    {% else %}
-                    <a href="/login" class="theme-primary text-white px-4 py-2 rounded-md hover:opacity-90 transition-opacity">Login</a>
                     {% endif %}
                 </div>
             </div>
@@ -82,15 +79,11 @@
 
     <!-- Footer -->
     <footer class="theme-card border-t mt-auto">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex justify-between items-center">
-                <p class="theme-text-secondary text-sm">© 2025 Telegram Stremio. All rights reserved.</p>
-                <div class="flex space-x-4">
-                    <a href="/status" class="theme-text-secondary hover:text-primary text-sm transition-colors">Status</a>
-                    <a href="/stremio" class="theme-text-secondary hover:text-primary text-sm transition-colors">Stremio Guide</a>
-                </div>
-            </div>
-        </div>
-    </footer>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex justify-center">
+        <p class="theme-text-secondary text-sm text-center">
+            © 2025 Telegram Stremio.
+        </p>
+    </div>
+</footer>
 </body>
 </html>
