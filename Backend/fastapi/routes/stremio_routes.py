@@ -18,17 +18,43 @@ router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 
 # --- Genres ---
 GENRES = [
-    "Aile", "Aksiyon", "Aksiyon ve Macera", "Animasyon", "Belgesel",
-    "Bilim Kurgu", "Bilim Kurgu ve Fantazi", "Biyografi", "Çocuklar",
-    "Dram", "Fantastik", "Gerilim", "Gerçeklik", "Gizem", "Haberler",
-    "Kara Film", "Komedi", "Korku", "Kısa", "Macera", "Müzik",
-    "Müzikal", "Oyun Gösterisi", "Pembe Dizi", "Romantik", "Savaş",
-    "Savaş ve Politika", "Spor", "Suç", "TV Filmi", "Talk-Show",
-    "Tarih", "Vahşi Batı"
+    "Aile", "Aksiyon", "Animasyon", "Belgesel", "Bilim Kurgu",
+    "Biyografi", "Çocuklar", "Dram", "Fantastik", "Gerilim",
+    "Gizem", "Komedi", "Korku", "Macera", "Müzik",
+    "Romantik", "Savaş", "Spor", "Suç", "Tarih"
 ]
+
+# --- Platform Mapping ---
+PLATFORM_TAGS = {
+    "netflix": ["nf"],
+    "disney": ["dsnp"],
+    "amazon": ["amzn"],
+    "hbo": ["blutv", "hbo", "hbomax"],
+}
 
 
 # --- Helpers ---
+def detect_platform_from_item(item: dict) -> Optional[str]:
+    """
+    Telegram filename'larından PTN ile platform algılar
+    """
+    for q in item.get("telegram", []):
+        name = q.get("name", "")
+        try:
+            parsed = PTN.parse(name)
+        except Exception:
+            continue
+
+        release = (parsed.get("releaseGroup") or "").lower()
+        extra = name.lower()
+
+        for platform, tags in PLATFORM_TAGS.items():
+            for t in tags:
+                if t in release or f".{t}." in extra or f" {t} " in extra:
+                    return platform
+    return None
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     stremio_id = f"{item.get('tmdb_id')}-{item.get('db_index')}"
@@ -52,119 +78,36 @@ def convert_to_stremio_meta(item: dict) -> dict:
     }
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str) -> tuple[str, str]:
-    if file_id.startswith("http://") or file_id.startswith("https://"):
-        source_prefix = "Link"
-    else:
-        source_prefix = "Telegram"
-
-    try:
-        parsed = PTN.parse(filename)
-    except Exception:
-        return (
-            f"{source_prefix} {quality}",
-            f"📁 {filename}\n💾 {size}"
-        )
-
-    codec_parts = []
-    if parsed.get("codec"):
-        codec_parts.append(f"🎥 {parsed['codec']}")
-    if parsed.get("bitDepth"):
-        codec_parts.append(f"🔟 {parsed['bitDepth']}bit")
-    if parsed.get("audio"):
-        codec_parts.append(f"🔊 {parsed['audio']}")
-    if parsed.get("encoder"):
-        codec_parts.append(f"👤 {parsed['encoder']}")
-
-    codec_info = " ".join(codec_parts)
-
-    resolution = parsed.get("resolution", quality)
-    quality_type = parsed.get("quality", "")
-
-    stream_name = f"{source_prefix} {resolution} {quality_type}".strip()
-
-    stream_title = "\n".join(
-        filter(None, [
-            f"📁 {filename}",
-            f"💾 {size}",
-            codec_info
-        ])
-    )
-
-    return stream_name, stream_title
-
-
-def get_resolution_priority(name: str) -> int:
-    mapping = {
-        "2160p": 2160, "4k": 2160,
-        "1080p": 1080,
-        "720p": 720,
-        "480p": 480,
-        "360p": 360,
-    }
-    for k, v in mapping.items():
-        if k in name.lower():
-            return v
-    return 1
-
-
-# ✅ SADECE BOYUT İÇİN EKLENDİ
-def parse_size(size_str: str) -> float:
-    if not size_str:
-        return 0.0
-
-    size_str = size_str.lower().replace(" ", "")
-    try:
-        if "gb" in size_str:
-            return float(size_str.replace("gb", "")) * 1024
-        if "mb" in size_str:
-            return float(size_str.replace("mb", ""))
-    except ValueError:
-        pass
-
-    return 0.0
-
-
 # --- Manifest ---
 @router.get("/manifest.json")
 async def manifest():
+    catalogs = []
+
+    for platform in ["netflix", "amazon", "disney", "hbo"]:
+        for media_type in ["movie", "series"]:
+            label = f"{platform.capitalize()} {'Filmleri' if media_type == 'movie' else 'Dizileri'}"
+
+            catalogs.append({
+                "type": media_type,
+                "id": f"{platform}_{media_type}_latest",
+                "name": f"{label} • Son Eklenenler",
+                "extraSupported": ["skip"]
+            })
+            catalogs.append({
+                "type": media_type,
+                "id": f"{platform}_{media_type}_top",
+                "name": f"{label} • Popüler",
+                "extraSupported": ["skip"]
+            })
+
     return {
         "id": "telegram.media",
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
-        "description": "Dizi ve film arşivim.",
+        "description": "Platform bazlı dizi ve film arşivi",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
-        "catalogs": [
-            {
-                "type": "movie",
-                "id": "latest_movies",
-                "name": "Latest",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "top_movies",
-                "name": "Popular",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "latest_series",
-                "name": "Latest",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "top_series",
-                "name": "Popular",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            }
-        ],
+        "catalogs": catalogs,
     }
 
 
@@ -172,31 +115,39 @@ async def manifest():
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
 @router.get("/catalog/{media_type}/{id}.json")
 async def catalog(media_type: str, id: str, extra: Optional[str] = None):
-    stremio_skip = 0
-    genre = None
-
+    skip = 0
     if extra:
         for p in extra.replace("&", "/").split("/"):
-            if p.startswith("genre="):
-                genre = unquote(p[6:])
-            elif p.startswith("skip="):
-                stremio_skip = int(p[5:] or 0)
+            if p.startswith("skip="):
+                skip = int(p[5:] or 0)
 
-    page = (stremio_skip // PAGE_SIZE) + 1
+    page = (skip // PAGE_SIZE) + 1
 
-    if "top" in id:
-        sort = [("rating", "desc")]
-    else:
-        sort = [("updated_on", "desc")]
+    platform = None
+    for p in PLATFORM_TAGS:
+        if id.startswith(p):
+            platform = p
+            break
+
+    is_top = id.endswith("_top")
+    sort = [("rating", "desc")] if is_top else [("updated_on", "desc")]
 
     if media_type == "movie":
-        data = await db.sort_movies(sort, page, PAGE_SIZE, genre)
+        data = await db.sort_movies(sort, page, PAGE_SIZE, None)
         items = data.get("movies", [])
     else:
-        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, None)
         items = data.get("tv_shows", [])
 
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
+    if platform:
+        items = [
+            i for i in items
+            if detect_platform_from_item(i) == platform
+        ]
+
+    return {
+        "metas": [convert_to_stremio_meta(i) for i in items]
+    }
 
 
 # --- Meta ---
@@ -251,8 +202,6 @@ async def streams(media_type: str, id: str):
         quality = q.get("quality", "HD")
         size = q.get("size", "")
 
-        name, title = format_stream_details(filename, quality, size, file_id)
-
         url = (
             file_id
             if file_id.startswith(("http://", "https://"))
@@ -260,22 +209,9 @@ async def streams(media_type: str, id: str):
         )
 
         streams.append({
-            "name": name,
-            "title": title,
-            "url": url,
-            "_size": parse_size(size)   # ← sadece sıralama için
+            "name": quality,
+            "title": f"📁 {filename}\n💾 {size}",
+            "url": url
         })
-
-    # ✅ AYNI ÇÖZÜNÜRLÜKTE BOYUTU BÜYÜK OLAN ÜSTE
-    streams.sort(
-        key=lambda s: (
-            get_resolution_priority(s["name"]),
-            s["_size"]
-        ),
-        reverse=True
-    )
-
-    for s in streams:
-        s.pop("_size", None)
 
     return {"streams": streams}
