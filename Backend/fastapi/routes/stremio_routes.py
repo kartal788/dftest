@@ -31,17 +31,17 @@ GENRES = [
 ]
 
 # -------------------------------------------------
-# PLATFORM ALGILAMA (ÇOKLU)
+# PLATFORM ALGILAMA
 # -------------------------------------------------
 def detect_platforms(filename: str) -> list[str]:
     if not filename:
         return []
     name = filename.lower()
-    platforms = []
-    for platform, keys in PLATFORM_RULES.items():
-        if any(k in name for k in keys):
-            platforms.append(platform)
-    return platforms
+    return [
+        platform
+        for platform, keys in PLATFORM_RULES.items()
+        if any(k in name for k in keys)
+    ]
 
 # -------------------------------------------------
 # STREMIO META FORMAT
@@ -66,38 +66,30 @@ def convert_to_stremio_meta(item: dict) -> dict:
     }
 
 # -------------------------------------------------
-# MANIFEST
+# MANIFEST (TEK SATIR PLATFORM)
 # -------------------------------------------------
 @router.get("/manifest.json")
 async def manifest():
-    catalogs = [
-        {"type": "movie", "id": "latest_movies", "name": "Latest"},
-        {"type": "movie", "id": "top_movies", "name": "Popular"},
-        {"type": "series", "id": "latest_series", "name": "Latest"},
-        {"type": "series", "id": "top_series", "name": "Popular"},
-    ]
+    catalogs = []
 
     for platform in PLATFORM_RULES.keys():
         for media_type, label in [("movie", "Filmleri"), ("series", "Dizileri")]:
-            catalogs.extend([
-                {
-                    "type": media_type,
-                    "id": f"{platform.lower()}_{media_type}_popular",
-                    "name": f"{platform} {label} · Popular"
-                },
-                {
-                    "type": media_type,
-                    "id": f"{platform.lower()}_{media_type}_released",
-                    "name": f"{platform} {label} · Released"
-                },
-                {
-                    "type": media_type,
-                    "id": f"{platform.lower()}_{media_type}_genres",
-                    "name": f"{platform} {label} · Genres",
-                    "extra": [{"name": "genre", "options": GENRES}],
-                    "extraSupported": ["genre"]
-                }
-            ])
+            catalogs.append({
+                "type": media_type,
+                "id": f"{platform.lower()}_{media_type}",
+                "name": f"{platform} {label}",
+                "extra": [
+                    {
+                        "name": "sort",
+                        "options": ["popular", "released"]
+                    },
+                    {
+                        "name": "genre",
+                        "options": GENRES
+                    }
+                ],
+                "extraSupported": ["sort", "genre", "skip"]
+            })
 
     return {
         "id": "telegram.media",
@@ -117,32 +109,31 @@ async def manifest():
 async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     skip = 0
     genre = None
+    sort_mode = None
 
     if extra:
         for p in extra.replace("&", "/").split("/"):
             if p.startswith("skip="):
                 skip = int(p.replace("skip=", ""))
-            if p.startswith("genre="):
+            elif p.startswith("genre="):
                 genre = unquote(p.replace("genre=", ""))
+            elif p.startswith("sort="):
+                sort_mode = p.replace("sort=", "")
 
     page = (skip // PAGE_SIZE) + 1
-    platform = None
+
+    # Default sort
     sort = [("updated_on", "desc")]
 
-    parts = id.split("_")
-
-    if parts[0].capitalize() in PLATFORM_RULES:
-        platform = parts[0].capitalize()
-        mode = parts[-1]
-
-        if mode == "popular":
-            sort = [("rating", "desc")]
-        elif mode == "released":
-            sort = [("released" if media_type == "series" else "updated_on", "desc")]
-
-    elif "top" in id:
+    if sort_mode == "popular":
         sort = [("rating", "desc")]
+    elif sort_mode == "released":
+        sort = [("released" if media_type == "series" else "updated_on", "desc")]
 
+    parts = id.split("_")
+    platform = parts[0].capitalize() if parts[0].capitalize() in PLATFORM_RULES else None
+
+    # DB fetch
     if media_type == "movie":
         data = await db.sort_movies(sort, page, PAGE_SIZE, genre)
         items = data.get("movies", [])
@@ -150,6 +141,7 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
         data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
         items = data.get("tv_shows", [])
 
+    # Platform filtre
     if platform:
         filtered = []
         for item in items:
@@ -208,10 +200,10 @@ async def streams(media_type: str, id: str):
     streams = []
 
     for q in media["telegram"]:
-        file_id = q["id"]
         filename = q.get("name", "")
         quality = q.get("quality", "HD")
         size = q.get("size", "")
+        file_id = q["id"]
 
         try:
             parsed = PTN.parse(filename)
@@ -221,9 +213,6 @@ async def streams(media_type: str, id: str):
             resolution = quality
             codec = ""
 
-        name = f"Telegram {resolution}".strip()
-        title = f"📁 {filename}\n💾 {size}\n🎥 {codec}"
-
         url = (
             file_id
             if file_id.startswith(("http://", "https://"))
@@ -231,8 +220,8 @@ async def streams(media_type: str, id: str):
         )
 
         streams.append({
-            "name": name,
-            "title": title,
+            "name": f"Telegram {resolution}",
+            "title": f"📁 {filename}\n💾 {size}\n🎥 {codec}",
             "url": url
         })
 
