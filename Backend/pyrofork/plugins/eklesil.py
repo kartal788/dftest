@@ -17,7 +17,7 @@ MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
-tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
+tmdb = aioTMDb(key=TMDB_API, language="tr-TR", region="TR")
 
 # ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
