@@ -237,3 +237,47 @@ async def ekle(client: Client, message: Message):
         f"✅ Başarılı: {len(success)}\n"
         f"❌ Başarısız: {len(failed)}"
     )
+# ----------------- /SİL -----------------
+@Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
+async def sil(client: Client, message: Message):
+    uid = message.from_user.id
+    awaiting_confirmation[uid] = True
+
+    movie_count = await movie_col.count_documents({})
+    series_count = await series_col.count_documents({})
+
+    await message.reply_text(
+        "⚠️ **TÜM VERİLER SİLİNECEK!**\n\n"
+        "Onaylamak için **Evet**, iptal için **Hayır** yaz.\n\n"
+        f"🎬 Filmler: `{movie_count}`\n"
+        f"📺 Diziler: `{series_count}`"
+    )
+
+
+@Client.on_message(
+    filters.private
+    & CustomFilters.owner
+    & filters.regex("(?i)^(evet|hayır)$")
+)
+async def sil_onay(client: Client, message: Message):
+    uid = message.from_user.id
+
+    if uid not in awaiting_confirmation:
+        return
+
+    awaiting_confirmation.pop(uid)
+
+    if message.text.lower() == "evet":
+        movie_count = await movie_col.count_documents({})
+        series_count = await series_col.count_documents({})
+
+        await movie_col.delete_many({})
+        await series_col.delete_many({})
+
+        await message.reply_text(
+            f"✅ **Tüm veriler silindi**\n\n"
+            f"🎬 Filmler: `{movie_count}`\n"
+            f"📺 Diziler: `{series_count}`"
+        )
+    else:
+        await message.reply_text("❌ **Silme işlemi iptal edildi**")
