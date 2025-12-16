@@ -12,8 +12,11 @@ from Backend.helper.custom_filter import CustomFilters
 
 # ===================== CONFIG =====================
 DATABASE_RAW = os.getenv("DATABASE", "")
-db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip().startswith("mongodb+srv")]
-MONGO_URL = db_urls[1]
+db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip().startswith("mongodb")]
+if not db_urls:
+    raise RuntimeError("MongoDB URL bulunamadı")
+
+MONGO_URL = db_urls[0]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -28,7 +31,7 @@ API_SEMAPHORE = asyncio.Semaphore(12)
 awaiting_confirmation = {}
 
 # ===================== HELPERS =====================
-def pixeldrain_to_api(url):
+def pixeldrain_to_api(url: str) -> str:
     m = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     return f"https://pixeldrain.com/api/file/{m.group(1)}" if m else url
 
@@ -54,41 +57,31 @@ async def filename_from_url(url):
 async def filesize(url):
     size = await head(url, "Content-Length")
     if not size:
-        return None
+        return "YOK"
 
     size = int(size)
-    for u in ["B", "KB", "MB", "GB"]:
+    for u in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024:
             return f"{size:.2f} {u}"
         size /= 1024
 
 
 def parse_links_and_names(text: str):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
     items = []
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
 
         if line.startswith("/ekle"):
             line = line.replace("/ekle", "", 1).strip()
-            if not line:
-                i += 1
-                continue
 
         if line.startswith("http"):
             parts = line.split(maxsplit=1)
             url = parts[0]
-            name = parts[1] if len(parts) == 2 else None
-
-            if not name and i + 1 < len(lines) and not lines[i + 1].startswith("http"):
-                name = lines[i + 1]
-                i += 1
-
+            name = parts[1] if len(parts) > 1 else None
             items.append((pixeldrain_to_api(url), name))
-
-        i += 1
 
     return items
 
@@ -100,31 +93,33 @@ def year_from(date):
         return None
 
 
-def build_media_record(meta, details, filename, url, quality, media_type, season=None, episode=None):
-    base = {
+def build_movie(meta, filename, url, quality, size):
+    return {
         "tmdb_id": meta.id,
-        "title": meta.title if media_type == "movie" else meta.name,
+        "title": meta.title,
         "description": meta.overview or "",
         "rating": meta.vote_average or 0,
-        "release_year": year_from(meta.release_date if media_type == "movie" else meta.first_air_date),
+        "release_year": year_from(meta.release_date),
+        "media_type": "movie",
         "updated_on": str(datetime.utcnow()),
+        "telegram": [{
+            "quality": quality,
+            "id": url,
+            "name": filename,
+            "size": size
+        }]
     }
 
-    if media_type == "movie":
-        return {
-            **base,
-            "media_type": "movie",
-            "telegram": [{
-                "quality": quality,
-                "id": url,
-                "name": filename,
-                "size": "YOK"
-            }]
-        }
 
+def build_tv(meta, filename, url, quality, size, season, episode):
     return {
-        **base,
+        "tmdb_id": meta.id,
+        "title": meta.name,
+        "description": meta.overview or "",
+        "rating": meta.vote_average or 0,
+        "release_year": year_from(meta.first_air_date),
         "media_type": "tv",
+        "updated_on": str(datetime.utcnow()),
         "seasons": [{
             "season_number": season,
             "episodes": [{
@@ -134,7 +129,7 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
                     "quality": quality,
                     "id": url,
                     "name": filename,
-                    "size": "YOK"
+                    "size": size
                 }]
             }]
         }]
@@ -145,50 +140,54 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
 async def ekle(client: Client, message: Message):
     items = parse_links_and_names(message.text)
     if not items:
-        return await message.reply_text("Kullanım:\n/ekle link [dosya_adi.mkv]")
+        return await message.reply_text("Kullanım:\n/ekle link DOSYA_ADI.mkv")
 
     success, failed = [], []
 
-    for raw, custom_name in items:
+    for raw_url, custom_name in items:
         try:
-            filename = custom_name or await filename_from_url(raw)
+            filename = custom_name or await filename_from_url(raw_url)
             parsed = PTN.parse(filename)
 
             title = parsed.get("title")
+            year = parsed.get("year")
             season = parsed.get("season")
             episode = parsed.get("episode")
-            year = parsed.get("year")
             quality = parsed.get("resolution") or "UNKNOWN"
-            size = await filesize(raw) or "YOK"
+            size = await filesize(raw_url)
 
             async with API_SEMAPHORE:
                 if season and episode:
                     results = await tmdb.search().tv(query=title)
+                    meta = results[0]
                     col = series_col
-                    media_type = "tv"
+                    doc = await col.find_one({"tmdb_id": meta.id})
+
+                    if not doc:
+                        doc = build_tv(meta, filename, raw_url, quality, size, season, episode)
+                        await col.insert_one(doc)
+                    else:
+                        doc["updated_on"] = str(datetime.utcnow())
+                        await col.replace_one({"_id": doc["_id"]}, doc)
+
                 else:
                     results = await tmdb.search().movies(query=title, year=year)
+                    meta = results[0]
                     col = movie_col
-                    media_type = "movie"
+                    doc = await col.find_one({"tmdb_id": meta.id})
 
-            if not results:
-                raise Exception("TMDB bulunamadı")
-
-            meta = results[0]
-            details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
-
-            doc = await col.find_one({"tmdb_id": meta.id})
-            if not doc:
-                doc = build_media_record(meta, details, filename, raw, quality, media_type, season, episode)
-                doc["telegram" if media_type == "movie" else "seasons"][0]["telegram"][0]["size"] = size
-                await col.insert_one(doc)
-            else:
-                doc["updated_on"] = str(datetime.utcnow())
-                await col.replace_one({"_id": doc["_id"]}, doc)
+                    if not doc:
+                        doc = build_movie(meta, filename, raw_url, quality, size)
+                        await col.insert_one(doc)
+                    else:
+                        doc["updated_on"] = str(datetime.utcnow())
+                        await col.replace_one({"_id": doc["_id"]}, doc)
 
             success.append(filename)
-        except:
-            failed.append(filename)
+
+        except Exception as e:
+            print("HATA:", e)
+            failed.append(custom_name or raw_url)
 
     await message.reply_text(
         f"✅ Başarılı: {len(success)}\n❌ Başarısız: {len(failed)}"
@@ -197,11 +196,9 @@ async def ekle(client: Client, message: Message):
 # ===================== /SİL =====================
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def sil(client: Client, message: Message):
-    uid = message.from_user.id
-    awaiting_confirmation[uid] = True
-
+    awaiting_confirmation[message.from_user.id] = True
     await message.reply_text(
-        "⚠️ **TÜM VERİLER SİLİNECEK!**\n\n"
+        "⚠️ TÜM VERİLER SİLİNECEK!\n\n"
         "Onay için **Evet**, iptal için **Hayır** yaz."
     )
 
