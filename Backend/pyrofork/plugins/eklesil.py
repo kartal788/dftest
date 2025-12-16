@@ -130,7 +130,6 @@ async def ekle(client: Client, message: Message):
     if not args:
         return await message.reply_text("Kullanım: /ekle link [Özel İsim]")
 
-    # link + özel isim ayırma
     pairs, current = [], []
     for arg in args:
         if arg.startswith("http"):
@@ -138,15 +137,13 @@ async def ekle(client: Client, message: Message):
                 pairs.append(current)
             current = [arg]
         else:
-            if current:
-                current.append(arg)
+            current.append(arg)
     if current:
         pairs.append(current)
 
     inputs = [(pixeldrain_to_api(p[0]), " ".join(p[1:]).strip() if len(p) > 1 else None) for p in pairs]
 
     success, failed = [], []
-    total = len(inputs)
     msg = await message.reply_text("📥 İşlem başlatıldı...")
 
     for i, (raw, custom_name) in enumerate(inputs, start=1):
@@ -154,7 +151,6 @@ async def ekle(client: Client, message: Message):
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            # TMDB için temiz title
             if custom_name:
                 clean = PTN.parse(custom_name)
                 title = clean.get("title")
@@ -167,6 +163,7 @@ async def ekle(client: Client, message: Message):
             episode = parsed.get("episode")
             quality = parsed.get("resolution") or "UNKNOWN"
             size = await filesize(raw)
+            display_name = custom_name or filename
 
             async with API_SEMAPHORE:
                 if season and episode:
@@ -184,7 +181,6 @@ async def ekle(client: Client, message: Message):
             meta = results[0]
             details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
 
-            display_name = custom_name or filename
             doc = await col.find_one({"tmdb_id": meta.id})
 
             if not doc:
@@ -194,29 +190,43 @@ async def ekle(client: Client, message: Message):
                 else:
                     doc["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
                 await col.insert_one(doc)
+
             else:
                 if media_type == "movie":
-                    doc["telegram"].append({
-                        "quality": quality,
-                        "id": raw,
-                        "name": display_name,
-                        "size": size
-                    })
+                    t = next((x for x in doc["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        doc["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
+
                 else:
                     s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
                     if not s:
                         s = {"season_number": season, "episodes": []}
                         doc["seasons"].append(s)
+
                     e = next((x for x in s["episodes"] if x["episode_number"] == episode), None)
                     if not e:
                         e = {"episode_number": episode, "title": display_name, "telegram": []}
                         s["episodes"].append(e)
-                    e["telegram"].append({
-                        "quality": quality,
-                        "id": raw,
-                        "name": display_name,
-                        "size": size
-                    })
+
+                    t = next((x for x in e["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        e["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
 
                 doc["updated_on"] = str(datetime.utcnow())
                 await col.replace_one({"_id": doc["_id"]}, doc)
@@ -224,13 +234,13 @@ async def ekle(client: Client, message: Message):
             success.append(display_name)
 
         except Exception:
-            failed.append(custom_name or raw)
+            failed.append(display_name)
 
-        await msg.edit_text(f"🔄 {i}/{total}\n✅ {len(success)} | ❌ {len(failed)}")
+        await msg.edit_text(f"🔄 {i}/{len(inputs)}\n✅ {len(success)} | ❌ {len(failed)}")
 
     await msg.edit_text(
         f"📊 **Tamamlandı**\n\n"
-        f"🔢 Toplam: {total}\n"
+        f"🔢 Toplam: {len(inputs)}\n"
         f"✅ Başarılı: {len(success)}\n"
         f"❌ Başarısız: {len(failed)}"
     )
