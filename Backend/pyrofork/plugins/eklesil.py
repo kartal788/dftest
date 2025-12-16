@@ -130,7 +130,7 @@ async def ekle(client: Client, message: Message):
     if not args:
         return await message.reply_text("Kullanım: /ekle link [Özel İsim]")
 
-    # link + opsiyonel isim ayırma
+    # link + özel isim ayırma
     pairs, current = [], []
     for arg in args:
         if arg.startswith("http"):
@@ -154,10 +154,17 @@ async def ekle(client: Client, message: Message):
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            title = custom_name or parsed.get("title")
+            # TMDB için temiz title
+            if custom_name:
+                clean = PTN.parse(custom_name)
+                title = clean.get("title")
+                year = clean.get("year") or parsed.get("year")
+            else:
+                title = parsed.get("title")
+                year = parsed.get("year")
+
             season = parsed.get("season")
             episode = parsed.get("episode")
-            year = parsed.get("year")
             quality = parsed.get("resolution") or "UNKNOWN"
             size = await filesize(raw)
 
@@ -178,7 +185,6 @@ async def ekle(client: Client, message: Message):
             details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
 
             display_name = custom_name or filename
-
             doc = await col.find_one({"tmdb_id": meta.id})
 
             if not doc:
