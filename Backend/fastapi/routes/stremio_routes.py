@@ -28,7 +28,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     stremio_id = f"{item.get('tmdb_id')}-{item.get('db_index')}"
 
-    name = item.get("title")
+    name = item.get("title", "")
     if item.get("cevrildi"):
         name = "🇹🇷 " + name
 
@@ -49,7 +49,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
 
 
 def get_resolution_priority(name: str) -> int:
-    for r in [2160, 1080, 720, 480]:
+    for r in (2160, 1080, 720, 480):
         if str(r) in name:
             return r
     return 1
@@ -154,25 +154,23 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     page = (skip // PAGE_SIZE) + 1
 
     if id.startswith("platform_"):
-        _, kind, plat = id.split("_")
-        platform = plat.capitalize()
+        platform = id.split("_")[2].capitalize()
+        genre = platform  # PLATFORM = GENRE
 
     if media_type == "movie":
         data = await db.sort_movies(
-            sort=[("updated_on", "desc")],
-            page=page,
-            page_size=PAGE_SIZE,
-            genre=genre,
-            platform=platform
+            [("updated_on", "desc")],
+            page,
+            PAGE_SIZE,
+            genre
         )
         items = data.get("movies", [])
     else:
         data = await db.sort_tv_shows(
-            sort=[("updated_on", "desc")],
-            page=page,
-            page_size=PAGE_SIZE,
-            genre=genre,
-            platform=platform
+            [("updated_on", "desc")],
+            page,
+            PAGE_SIZE,
+            genre
         )
         items = data.get("tv_shows", [])
 
