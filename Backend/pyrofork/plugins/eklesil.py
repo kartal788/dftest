@@ -17,9 +17,7 @@ MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
-
-tmdb_tr = aioTMDb(key=TMDB_API, language="tr-TR", region="TR")
-tmdb_en = aioTMDb(key=TMDB_API, language="en-US", region="US")
+tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
 
 # ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
@@ -73,30 +71,18 @@ async def filesize(url):
     except:
         return "YOK"
 
-def merge(a, b):
-    """TR boşsa EN ile tamamla"""
-    for k, v in b.__dict__.items():
-        if not getattr(a, k, None):
-            setattr(a, k, v)
-    return a
-
-async def tmdb_details(media_type, tmdb_id):
-    tr = await (tmdb_tr.tv(tmdb_id).details() if media_type == "tv" else tmdb_tr.movie(tmdb_id).details())
-    en = await (tmdb_en.tv(tmdb_id).details() if media_type == "tv" else tmdb_en.movie(tmdb_id).details())
-    return merge(tr, en)
-
 def build_media_record(meta, details, display_name, url, quality, media_type, season=None, episode=None):
     genres = [g.name for g in safe(details, "genres", [])]
     cast = [c.name for c in safe(details, "cast", [])[:5]]
 
     base = {
         "tmdb_id": meta.id,
-        "imdb_id": safe(details, "imdb_id", ""),
+        "imdb_id": safe(meta, "imdb_id", ""),
         "db_index": 1,
         "title": safe(meta, "title", safe(meta, "name")),
         "genres": genres,
-        "description": safe(details, "overview", ""),
-        "rating": safe(details, "vote_average", 0),
+        "description": safe(meta, "overview", ""),
+        "rating": safe(meta, "vote_average", 0),
         "release_year": year_from(safe(meta, "release_date", safe(meta, "first_air_date"))),
         "poster": f"https://image.tmdb.org/t/p/w500{safe(meta,'poster_path','')}",
         "backdrop": f"https://image.tmdb.org/t/p/w780{safe(meta,'backdrop_path','')}",
@@ -161,13 +147,18 @@ async def ekle(client: Client, message: Message):
     msg = await message.reply_text("📥 İşlem başlatıldı...")
 
     for i, (raw, custom_name) in enumerate(inputs, start=1):
-        display_name = custom_name or raw
         try:
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            title = parsed.get("title")
-            year = parsed.get("year")
+            if custom_name:
+                clean = PTN.parse(custom_name)
+                title = clean.get("title")
+                year = clean.get("year") or parsed.get("year")
+            else:
+                title = parsed.get("title")
+                year = parsed.get("year")
+
             season = parsed.get("season")
             episode = parsed.get("episode")
             quality = parsed.get("resolution") or "UNKNOWN"
@@ -176,11 +167,11 @@ async def ekle(client: Client, message: Message):
 
             async with API_SEMAPHORE:
                 if season and episode:
-                    results = await tmdb_tr.search().tv(query=title)
+                    results = await tmdb.search().tv(query=title)
                     media_type = "tv"
                     col = series_col
                 else:
-                    results = await tmdb_tr.search().movies(query=title, year=year)
+                    results = await tmdb.search().movies(query=title, year=year)
                     media_type = "movie"
                     col = movie_col
 
@@ -188,7 +179,7 @@ async def ekle(client: Client, message: Message):
                 raise Exception("TMDB bulunamadı")
 
             meta = results[0]
-            details = await tmdb_details(media_type, meta.id)
+            details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
 
             doc = await col.find_one({"tmdb_id": meta.id})
 
@@ -199,27 +190,43 @@ async def ekle(client: Client, message: Message):
                 else:
                     doc["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
                 await col.insert_one(doc)
+
             else:
                 if media_type == "movie":
-                    doc["telegram"].append({
-                        "quality": quality,
-                        "id": raw,
-                        "name": display_name,
-                        "size": size
-                    })
+                    t = next((x for x in doc["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        doc["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
+
                 else:
                     s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
                     if not s:
                         s = {"season_number": season, "episodes": []}
                         doc["seasons"].append(s)
 
-                    e = {"episode_number": episode, "title": display_name, "telegram": [{
-                        "quality": quality,
-                        "id": raw,
-                        "name": display_name,
-                        "size": size
-                    }]}
-                    s["episodes"].append(e)
+                    e = next((x for x in s["episodes"] if x["episode_number"] == episode), None)
+                    if not e:
+                        e = {"episode_number": episode, "title": display_name, "telegram": []}
+                        s["episodes"].append(e)
+
+                    t = next((x for x in e["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        e["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
 
                 doc["updated_on"] = str(datetime.utcnow())
                 await col.replace_one({"_id": doc["_id"]}, doc)
@@ -237,47 +244,33 @@ async def ekle(client: Client, message: Message):
         f"✅ Başarılı: {len(success)}\n"
         f"❌ Başarısız: {len(failed)}"
     )
+
 # ----------------- /SİL -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def sil(client: Client, message: Message):
     uid = message.from_user.id
     awaiting_confirmation[uid] = True
 
-    movie_count = await movie_col.count_documents({})
-    series_count = await series_col.count_documents({})
-
     await message.reply_text(
-        "⚠️ **TÜM VERİLER SİLİNECEK!**\n\n"
-        "Onaylamak için **Evet**, iptal için **Hayır** yaz.\n\n"
-        f"🎬 Filmler: `{movie_count}`\n"
-        f"📺 Diziler: `{series_count}`"
+        "⚠️ **TÜM VERİLER SİLİNECEK**\n\n"
+        "Onay için **Evet**, iptal için **Hayır** yaz.\n\n"
+        f"🎬 Filmler: `{await movie_col.count_documents({})}`\n"
+        f"📺 Diziler: `{await series_col.count_documents({})}`"
     )
 
-
-@Client.on_message(
-    filters.private
-    & CustomFilters.owner
-    & filters.regex("(?i)^(evet|hayır)$")
-)
+@Client.on_message(filters.private & CustomFilters.owner & filters.regex("(?i)^(evet|hayır)$"))
 async def sil_onay(client: Client, message: Message):
     uid = message.from_user.id
-
     if uid not in awaiting_confirmation:
         return
 
     awaiting_confirmation.pop(uid)
 
     if message.text.lower() == "evet":
-        movie_count = await movie_col.count_documents({})
-        series_count = await series_col.count_documents({})
-
+        m = await movie_col.count_documents({})
+        s = await series_col.count_documents({})
         await movie_col.delete_many({})
         await series_col.delete_many({})
-
-        await message.reply_text(
-            f"✅ **Tüm veriler silindi**\n\n"
-            f"🎬 Filmler: `{movie_count}`\n"
-            f"📺 Diziler: `{series_count}`"
-        )
+        await message.reply_text(f"✅ Silindi\n🎬 {m} | 📺 {s}")
     else:
-        await message.reply_text("❌ **Silme işlemi iptal edildi**")
+        await message.reply_text("❌ İptal edildi")
