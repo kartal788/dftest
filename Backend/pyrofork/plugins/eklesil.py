@@ -25,11 +25,6 @@ db = client[DB_NAME]
 movie_col = db["movie"]
 series_col = db["tv"]
 
-async def init_db():
-    global movie_col, series_col
-    movie_col = db["movie"]
-    series_col = db["tv"]
-
 API_SEMAPHORE = asyncio.Semaphore(12)
 awaiting_confirmation = {}
 
@@ -66,19 +61,19 @@ async def filename_from_url(url):
 async def filesize(url):
     size = await head(url, "Content-Length")
     if not size:
-        return "UNKNOWN"
-    size = int(size)
-    for u in ["B", "KB", "MB", "GB"]:
-        if size < 1024:
-            return f"{size:.2f} {u}"
-        size /= 1024
+        return "YOK"
+    try:
+        size = int(size)
+        for u in ["B", "KB", "MB", "GB"]:
+            if size < 1024:
+                return f"{size:.2f} {u}"
+            size /= 1024
+    except:
+        return "YOK"
 
-def build_media_record(meta, details, filename, url, quality, media_type, season=None, episode=None):
+def build_media_record(meta, details, display_name, url, quality, media_type, season=None, episode=None):
     genres = [g.name for g in safe(details, "genres", [])]
     cast = [c.name for c in safe(details, "cast", [])[:5]]
-    poster = safe(meta, "poster_path", "")
-    backdrop = safe(meta, "backdrop_path", "")
-    logo = safe(meta, "logo", "")
 
     base = {
         "tmdb_id": meta.id,
@@ -89,9 +84,8 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
         "description": safe(meta, "overview", ""),
         "rating": safe(meta, "vote_average", 0),
         "release_year": year_from(safe(meta, "release_date", safe(meta, "first_air_date"))),
-        "poster": f"https://image.tmdb.org/t/p/w500{poster}",
-        "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
-        "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+        "poster": f"https://image.tmdb.org/t/p/w500{safe(meta,'poster_path','')}",
+        "backdrop": f"https://image.tmdb.org/t/p/w780{safe(meta,'backdrop_path','')}",
         "cast": cast,
         "updated_on": str(datetime.utcnow()),
     }
@@ -104,8 +98,8 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
             "telegram": [{
                 "quality": quality,
                 "id": url,
-                "name": filename,
-                "size": "UNKNOWN"
+                "name": display_name,
+                "size": "YOK"
             }]
         }
 
@@ -117,14 +111,12 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
             "season_number": season,
             "episodes": [{
                 "episode_number": episode,
-                "title": filename,
-                "overview": safe(meta, "overview", ""),
-                "released": None,
+                "title": display_name,
                 "telegram": [{
                     "quality": quality,
                     "id": url,
-                    "name": filename,
-                    "size": "UNKNOWN"
+                    "name": display_name,
+                    "size": "YOK"
                 }]
             }]
         }]
@@ -133,41 +125,36 @@ def build_media_record(meta, details, filename, url, quality, media_type, season
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
-    from datetime import datetime
-
-    def progress_bar(done, total, length=20):
-        filled = int(length * done / total)
-        return "█" * filled + "░" * (length - filled)
-
-    def progress_text(done, total, ok, fail):
-        return (
-            f"📥 Dosyalar ekleniyor...\n\n"
-            f"`[{progress_bar(done, total)}]`\n"
-            f"🔄 İşlenen: {done}/{total}\n"
-            f"✅ Başarılı: {len(ok)}\n"
-            f"❌ Başarısız: {len(fail)}"
-        )
 
     args = message.command[1:]
     if not args:
-        return await message.reply_text("Kullanım: /ekle link [link2 ...]")
+        return await message.reply_text("Kullanım: /ekle link [Özel İsim]")
 
-    urls = [pixeldrain_to_api(x) for x in args if x.startswith("http")]
-    total = len(urls)
+    # link + opsiyonel isim ayırma
+    pairs, current = [], []
+    for arg in args:
+        if arg.startswith("http"):
+            if current:
+                pairs.append(current)
+            current = [arg]
+        else:
+            if current:
+                current.append(arg)
+    if current:
+        pairs.append(current)
 
-    success = []
-    failed = []
+    inputs = [(pixeldrain_to_api(p[0]), " ".join(p[1:]).strip() if len(p) > 1 else None) for p in pairs]
 
-    progress_msg = await message.reply_text("📥 Başlatılıyor...")
-    last_edit = datetime.utcnow()
+    success, failed = [], []
+    total = len(inputs)
+    msg = await message.reply_text("📥 İşlem başlatıldı...")
 
-    for i, raw in enumerate(urls, start=1):
-        filename = raw
+    for i, (raw, custom_name) in enumerate(inputs, start=1):
         try:
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            title = parsed.get("title")
+            title = custom_name or parsed.get("title")
             season = parsed.get("season")
             episode = parsed.get("episode")
             year = parsed.get("year")
@@ -188,127 +175,74 @@ async def ekle(client: Client, message: Message):
                 raise Exception("TMDB bulunamadı")
 
             meta = results[0]
-            details = await (
-                tmdb.tv(meta.id).details()
-                if media_type == "tv"
-                else tmdb.movie(meta.id).details()
-            )
+            details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
 
-            # -------- MOVIE --------
-            if media_type == "movie":
-                doc = await col.find_one({"tmdb_id": meta.id})
+            display_name = custom_name or filename
 
-                if not doc:
-                    doc = build_media_record(meta, details, filename, raw, quality, "movie")
+            doc = await col.find_one({"tmdb_id": meta.id})
+
+            if not doc:
+                doc = build_media_record(meta, details, display_name, raw, quality, media_type, season, episode)
+                if media_type == "movie":
                     doc["telegram"][0]["size"] = size
-                    await col.insert_one(doc)
                 else:
-                    tg = doc.get("telegram", [])
-                    f = next((x for x in tg if x["name"] == filename), None)
-                    if f:
-                        f.update({"quality": quality, "id": raw, "size": size})
-                    else:
-                        tg.append({
-                            "quality": quality,
-                            "id": raw,
-                            "name": filename,
-                            "size": size
-                        })
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
-
-            # -------- TV --------
-            else:
-                doc = await col.find_one({"tmdb_id": meta.id})
-
-                if not doc:
-                    doc = build_media_record(
-                        meta, details, filename, raw, quality, "tv", season, episode
-                    )
                     doc["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
-                    await col.insert_one(doc)
+                await col.insert_one(doc)
+            else:
+                if media_type == "movie":
+                    doc["telegram"].append({
+                        "quality": quality,
+                        "id": raw,
+                        "name": display_name,
+                        "size": size
+                    })
                 else:
                     s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
                     if not s:
                         s = {"season_number": season, "episodes": []}
                         doc["seasons"].append(s)
-
                     e = next((x for x in s["episodes"] if x["episode_number"] == episode), None)
                     if not e:
-                        e = {"episode_number": episode, "title": filename, "telegram": []}
+                        e = {"episode_number": episode, "title": display_name, "telegram": []}
                         s["episodes"].append(e)
+                    e["telegram"].append({
+                        "quality": quality,
+                        "id": raw,
+                        "name": display_name,
+                        "size": size
+                    })
 
-                    t = next((x for x in e["telegram"] if x["name"] == filename), None)
-                    if t:
-                        t.update({"quality": quality, "id": raw, "size": size})
-                    else:
-                        e["telegram"].append({
-                            "quality": quality,
-                            "id": raw,
-                            "name": filename,
-                            "size": size
-                        })
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
 
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
-
-            success.append(filename)
+            success.append(display_name)
 
         except Exception:
-            failed.append(filename)
+            failed.append(custom_name or raw)
 
-        # ⏱ 15 saniyede bir edit
-        if (datetime.utcnow() - last_edit).seconds >= 15 or i == total:
-            await progress_msg.edit_text(
-                progress_text(i, total, success, failed)
-            )
-            last_edit = datetime.utcnow()
+        await msg.edit_text(f"🔄 {i}/{total}\n✅ {len(success)} | ❌ {len(failed)}")
 
-    # -------- SONUÇ --------
-    summary = (
-        f"📊 **İşlem Tamamlandı**\n\n"
+    await msg.edit_text(
+        f"📊 **Tamamlandı**\n\n"
         f"🔢 Toplam: {total}\n"
         f"✅ Başarılı: {len(success)}\n"
         f"❌ Başarısız: {len(failed)}"
     )
 
-    detail = (
-        "✅ Başarılı Dosyalar:\n" + "\n".join(success) +
-        "\n\n❌ Başarısız Dosyalar:\n" + "\n".join(failed)
-    )
-
-    if total > 10:
-        path = "/tmp/ekle_sonuc.txt"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(summary + "\n\n" + detail)
-
-        await progress_msg.edit_text(summary)
-        await message.reply_document(path)
-        os.remove(path)
-    else:
-        await progress_msg.edit_text(summary + "\n\n" + detail)
-
 # ----------------- /SİL -----------------
-awaiting_confirmation = {}
-
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def sil(client: Client, message: Message):
     uid = message.from_user.id
     awaiting_confirmation[uid] = True
+
     await message.reply_text(
-        "⚠️ **TÜM VERİLER SİLİNECEK!**\n\n"
+        "⚠️ **TÜM VERİLER SİLİNECEK**\n\n"
         "Onay için **Evet**, iptal için **Hayır** yaz.\n\n"
-        "📊 Silinecek veriler:\n"
         f"🎬 Filmler: `{await movie_col.count_documents({})}`\n"
         f"📺 Diziler: `{await series_col.count_documents({})}`"
     )
 
-
-@Client.on_message(
-    filters.private &
-    CustomFilters.owner &
-    filters.regex("(?i)^(evet|hayır)$")
-)
+@Client.on_message(filters.private & CustomFilters.owner & filters.regex("(?i)^(evet|hayır)$"))
 async def sil_onay(client: Client, message: Message):
     uid = message.from_user.id
     if uid not in awaiting_confirmation:
@@ -317,17 +251,10 @@ async def sil_onay(client: Client, message: Message):
     awaiting_confirmation.pop(uid)
 
     if message.text.lower() == "evet":
-        movie_count = await movie_col.count_documents({})
-        series_count = await series_col.count_documents({})
-
+        m = await movie_col.count_documents({})
+        s = await series_col.count_documents({})
         await movie_col.delete_many({})
         await series_col.delete_many({})
-
-        await message.reply_text(
-            "✅ **Silme İşlemi Tamamlandı**\n\n"
-            f"🎬 Silinen Filmler: `{movie_count}`\n"
-            f"📺 Silinen Diziler: `{series_count}`\n"
-            f"🗑 Toplam: `{movie_count + series_count}`"
-        )
+        await message.reply_text(f"✅ Silindi\n🎬 {m} | 📺 {s}")
     else:
-        await message.reply_text("❌ İşlem iptal edildi.")
+        await message.reply_text("❌ İptal edildi")
