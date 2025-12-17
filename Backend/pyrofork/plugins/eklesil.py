@@ -215,18 +215,30 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
-    # Eğer 2'den fazla link eklenmişse, bilgileri dosyaya yazıyoruz
-    if len(args) > 2:
-        file_path = "eklenenler.txt"
-        with open(file_path, "w") as f:
-            for file_info in added_files:
-                f.write(file_info + "\n")
+# Eğer 2'den fazla link eklenmişse, bilgileri dosyaya yazıyoruz
+if len(args) > 2:
+    file_path = "eklenenler.txt"
+    with open(file_path, "w") as f:
+        for file_info in added_files:
+            f.write(file_info + "\n")
 
-        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
-        await status.edit_text(
-            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
-            "Dosyayı kontrol edebilirsiniz."
+    # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+    await status.edit_text(
+        f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+        "Dosyayı kontrol edebilirsiniz."
+    )
+
+    # Dosyayı Telegram'a gönderiyoruz
+    with open(file_path, "rb") as file:
+        await client.send_document(
+            message.chat.id, 
+            file, 
+            caption="İşte eklenen dosyalarla ilgili bilgiler:"
         )
+    
+    # Dosyayı gönderimden sonra siliyoruz
+    os.remove(file_path)
+
     else:
         # Eğer 2'den az link varsa, kullanıcıya doğrudan mesaj gönderiyoruz
         await status.edit_text(f"✅ **Ekleme başarılı**\n\n{''.join(reply_message)}")
