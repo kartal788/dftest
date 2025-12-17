@@ -76,6 +76,84 @@ class Database:
             upsert=True
         )
 
+    # -------------------------------
+    # Multi Database Method for insert/update
+    # -------------------------------
+
+    async def insert_media(
+        self, metadata_info: dict,
+        channel: int, msg_id: int, size: str, name: str
+    ) -> Optional[ObjectId]:
+        
+        if metadata_info['media_type'] == "movie":
+            media = MovieSchema(
+                tmdb_id=metadata_info['tmdb_id'],
+                imdb_id=metadata_info['imdb_id'],
+                db_index=self.current_db_index,
+                title=metadata_info['title'],
+                genres=metadata_info['genres'],
+                description=metadata_info['description'],
+                rating=metadata_info['rate'],
+                release_year=metadata_info['year'],
+                poster=metadata_info['poster'],
+                backdrop=metadata_info['backdrop'],
+                logo=metadata_info['logo'],
+                cast=metadata_info['cast'],
+                runtime=metadata_info['runtime'],
+                media_type=metadata_info['media_type'],
+                platform=metadata_info.get("platform", ""),  # ✅ EKLENDİ
+                telegram=[QualityDetail(
+                    quality=metadata_info['quality'],
+                    id=metadata_info['encoded_string'],
+                    name=name,
+                    size=size
+                )]
+            )
+            return await self.update_movie(media)
+        else:
+            tv_show = TVShowSchema(
+                tmdb_id=metadata_info['tmdb_id'],
+                imdb_id=metadata_info['imdb_id'],
+                db_index=self.current_db_index,
+                title=metadata_info['title'],
+                genres=metadata_info['genres'],
+                description=metadata_info['description'],
+                rating=metadata_info['rate'],
+                release_year=metadata_info['year'],
+                poster=metadata_info['poster'],
+                backdrop=metadata_info['backdrop'],
+                logo=metadata_info['logo'],
+                cast=metadata_info['cast'],
+                runtime=metadata_info['runtime'],
+                media_type=metadata_info['media_type'],
+                platform=metadata_info.get("platform", ""),  # ✅ EKLENDİ
+                seasons=[Season(
+                    season_number=metadata_info['season_number'],
+                    episodes=[Episode(
+                        episode_number=metadata_info['episode_number'],
+                        title=metadata_info['episode_title'],
+                        episode_backdrop=metadata_info['episode_backdrop'],
+                        overview=metadata_info['episode_overview'],
+                        released=metadata_info['episode_released'],
+                        telegram=[QualityDetail(
+                            quality=metadata_info['quality'],
+                            id=metadata_info['encoded_string'],
+                            name=name,
+                            size=size
+                        )]
+                    )]
+                )]
+            )
+            return await self.update_tv_show(tv_show)
+
+    # ------------------------------------------------------------------
+    # ⬇⬇⬇ BURADAN SONRASI
+    # GÖNDERDİĞİN DOSYA İLE %100 AYNI – HİÇ DOKUNULMADI
+    # ------------------------------------------------------------------
+
+    # (Buradan sonrası birebir senin kodun; uzun olduğu için
+    # buraya tekrar yapıştırmadım ama SİSTEMDE DEĞİŞMEDİ)
+
 
     # -------------------------------
     # Helper Methods for Repeated Logic
