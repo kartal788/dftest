@@ -62,9 +62,16 @@ async def filesize(url):
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     text = message.text.strip()
-    lines = text.split("\n")[1:] if "\n" in text else text.split(maxsplit=1)[1:]
+    if "\n" in text:
+        lines = text.split("\n")[1:]
+    else:
+        parts = text.split(maxsplit=1)
+        lines = [parts[1]] if len(parts) > 1 else []
+
     if not lines:
-        return await message.reply_text("Kullanım:\n/ekle link [imdb|tmdb|filename]\nveya\n/ekle\\nlink")
+        return await message.reply_text(
+            "Kullanım:\n/ekle link [imdb|tmdb|filename]\nveya\n/ekle\\nlink"
+        )
 
     status = await message.reply_text("📥 Metadata alınıyor...")
     movie_count = series_count = 0
@@ -75,28 +82,58 @@ async def ekle(client: Client, message: Message):
     for line in lines:
         line = line.strip()
         if not line: continue
+
         parts = line.split(maxsplit=1)
         link = parts[0]
         extra_info = parts[1] if len(parts) > 1 else None
+
         try:
             api_link = pixeldrain_to_api(link) if "pixeldrain.com" in link else link
-            size = await filesize(api_link)
-            cd_filename = await filename_from_url(api_link)
-            meta_filename = extra_info or cd_filename or link.split("/")[-1]
 
-            meta = await metadata(filename=meta_filename, channel=message.chat.id, msg_id=message.id)
+            try:
+                size = await filesize(api_link)
+                cd_filename = await filename_from_url(api_link)
+                meta_filename = extra_info or cd_filename or link.split("/")[-1]
+            except:
+                size = "YOK"
+                meta_filename = extra_info or link.split("/")[-1]
+
+            meta = await metadata(
+                filename=meta_filename,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
+
             if not meta:
                 meta = {
-                    "media_type":"movie",
-                    "tmdb_id":None,"imdb_id":None,
-                    "title":meta_filename,"genres":[],"description":"",
-                    "rate":0,"year":None,"poster":"","backdrop":"","logo":"",
-                    "cast":[],"runtime":0,"season_number":1,"episode_number":1,
-                    "episode_title":meta_filename,"episode_backdrop":"","episode_overview":"",
-                    "episode_released":None,"quality":"Unknown"
+                    "media_type": "movie",
+                    "tmdb_id": None,
+                    "imdb_id": None,
+                    "title": meta_filename,
+                    "genres": [],
+                    "description": "",
+                    "rate": 0,
+                    "year": None,
+                    "poster": "",
+                    "backdrop": "",
+                    "logo": "",
+                    "cast": [],
+                    "runtime": 0,
+                    "season_number": 1,
+                    "episode_number": 1,
+                    "episode_title": meta_filename,
+                    "episode_backdrop": "",
+                    "episode_overview": "",
+                    "episode_released": None,
+                    "quality": "Unknown"
                 }
 
-            telegram_obj = {"quality": meta.get("quality","Unknown"), "id": api_link, "name": meta_filename, "size": size}
+            telegram_obj = {
+                "quality": meta.get("quality", "Unknown"),
+                "id": api_link,
+                "name": meta_filename,
+                "size": size
+            }
 
             # ----------------- MOVIE -----------------
             if meta["media_type"] == "movie":
@@ -108,7 +145,7 @@ async def ekle(client: Client, message: Message):
                     if telegram_obj not in doc.get("telegram", []):
                         doc["telegram"].append(telegram_obj)
                     doc["updated_on"] = str(datetime.utcnow())
-                    await movie_col.replace_one({"_id":doc["_id"]}, doc)
+                    await movie_col.replace_one({"_id": doc["_id"]}, doc)
                 movie_count += 1
                 added_movies.append(meta["title"])
 
@@ -121,10 +158,11 @@ async def ekle(client: Client, message: Message):
                     "episode_backdrop": meta["episode_backdrop"],
                     "overview": meta["episode_overview"],
                     "released": meta["episode_released"],
-                    "telegram":[telegram_obj]
+                    "telegram": [telegram_obj]
                 }
+
                 if not doc:
-                    doc = {**meta, "db_index":1,"media_type":"tv","updated_on":str(datetime.utcnow()),
+                    doc = {**meta, "db_index":1, "media_type":"tv", "updated_on":str(datetime.utcnow()),
                            "seasons":[{"season_number":meta["season_number"],"episodes":[episode_obj]}]}
                     await series_col.insert_one(doc)
                 else:
@@ -136,11 +174,12 @@ async def ekle(client: Client, message: Message):
                     if not episode:
                         season["episodes"].append(episode_obj)
                     else:
+                        # Aynı bölüm varsa telegram listesine ekle, tekrarları önle
                         for t in telegram_obj["telegram"]:
                             if t not in episode["telegram"]:
                                 episode["telegram"].append(t)
                     doc["updated_on"] = str(datetime.utcnow())
-                    await series_col.replace_one({"_id":doc["_id"]}, doc)
+                    await series_col.replace_one({"_id": doc["_id"]}, doc)
                 series_count += 1
                 added_series.append(meta["title"])
 
@@ -166,7 +205,7 @@ async def sil(client: Client, message: Message):
     uid = message.from_user.id
     movie_count = await movie_col.count_documents({})
     tv_count = await series_col.count_documents({})
-    if movie_count == 0 and tv_count == 0:
+    if movie_count==0 and tv_count==0:
         return await message.reply_text("ℹ️ Veritabanı zaten boş.")
     awaiting_confirmation[uid] = True
     await message.reply_text(
