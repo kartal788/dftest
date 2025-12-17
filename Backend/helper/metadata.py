@@ -36,7 +36,7 @@ GENRE_TUR_ALIASES = {
         "Reality-TV": "Gerçeklik", "Sci-Fi & Fantasy": "Bilim Kurgu ve Fantazi", "Soap": "Pembe Dizi",
         "War & Politics": "Savaş ve Politika", "Bilim-Kurgu": "Bilim Kurgu",
         "Aksiyon & Macera": "Aksiyon ve Macera", "Savaş & Politik": "Savaş ve Politika",
-        "Bilim Kurgu & Fantazi": "Bilim Kurgu ve Fantazi", "Talk": "Talk-Show"
+        "Bilim Kurgu & Fantazi": "Bilim Kurgu ve Fantazi", "Talk": "Talk-Show",
 }
 
 def tur_genre_normalize(genres):
