@@ -60,6 +60,8 @@ async def filesize(url):
     return "YOK"
 
 # ----------------- /EKLE -----------------
+import os
+
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     args = message.command[1:]  # Kullanıcıdan gelen komut parametrelerini alıyoruz
@@ -67,6 +69,9 @@ async def ekle(client: Client, message: Message):
         return await message.reply_text("Kullanım: /ekle pixeldrain_link [pixeldrain_link_2] ...")
 
     status = await message.reply_text("📥 Metadata alınıyor...")
+
+    reply_message = []  # Çıktı mesajlarını depolayacağımız liste
+    added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
 
     # Tek tek tüm linkleri işleyebilmek için döngü başlatıyoruz
     for raw_link in args:
@@ -189,19 +194,19 @@ async def ekle(client: Client, message: Message):
             else:
                 titles = meta.get("title", "")
 
-            reply_message = (
+            reply_message.append(
                 f"🎬 **Başlıklar**:\n{titles}\n"
                 f"📄 **Ad**: {filename}\n"
                 f"📊 **Boyut**: {size}\n"
                 f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
             )
 
-            # Kullanıcıya her link için ayrı ayrı bilgi veriyoruz
-            await status.edit_text(f"✅ **Ekleme başarılı**\n\n{reply_message}")
+            # Eklenen dosyaları tutuyoruz
+            added_files.append(f"Ad: {filename}, Boyut: {size}, Kalite: {meta.get('quality', 'Bilgi Yok')}")
 
         except Exception as e:
             LOGGER.exception(e)
-            await status.edit_text(
+            reply_message.append(
                 "❌ **EKLEME BAŞARISIZ**\n\n"
                 f"📛 Hata: `{type(e).__name__}`\n"
                 f"📄 Açıklama: `{str(e)}`\n\n"
@@ -212,6 +217,20 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
+    # Eğer 2'den fazla link eklenmişse, bilgileri dosyaya yazıyoruz
+    if len(args) > 2:
+        file_path = "eklenenler.txt"
+        with open(file_path, "w") as f:
+            for file_info in added_files:
+                f.write(file_info + "\n")
+
+        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+        await status.edit_text(
+            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı."
+        )
+    else:
+        # Eğer 2'den az link varsa, kullanıcıya doğrudan mesaj gönderiyoruz
+        await status.edit_text(f"✅ **Ekleme başarılı**\n\n{''.join(reply_message)}")
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
