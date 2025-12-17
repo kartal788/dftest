@@ -62,7 +62,6 @@ async def filesize(url):
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
-
     args = message.command[1:]
     if not args:
         return await message.reply_text("Kullanım: /ekle pixeldrain_link")
@@ -166,7 +165,6 @@ async def ekle(client: Client, message: Message):
                     }]
                 }
                 await col.insert_one(doc)
-
             else:
                 season = next(
                     (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
@@ -183,7 +181,21 @@ async def ekle(client: Client, message: Message):
                 doc["updated_on"] = str(datetime.utcnow())
                 await col.replace_one({"_id": doc["_id"]}, doc)
 
-        await status.edit_text("✅ **Ekleme başarılı**")
+        # Yeni talep: "title", "name", "size", "quality" bilgilerini dökme
+        titles = meta.get("title", [])
+        if isinstance(titles, list):
+            titles = "\n".join(titles)  # Eğer title bir listeyse, her birini alt alta ekleriz
+        else:
+            titles = meta.get("title", "")
+
+        reply_message = (
+            f"🎬 **Başlıklar**:\n{titles}\n"
+            f"📄 **Ad**: {filename}\n"
+            f"📊 **Boyut**: {size}\n"
+            f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
+        )
+        
+        await status.edit_text(f"✅ **Ekleme başarılı**\n\n{reply_message}")
 
     except Exception as e:
         LOGGER.exception(e)
@@ -249,4 +261,3 @@ async def sil_onay(client: Client, message: Message):
         )
     else:
         await message.reply_text("❌ Silme işlemi iptal edildi.")
-
