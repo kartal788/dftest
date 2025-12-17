@@ -63,7 +63,7 @@ async def filesize(url):
     except:
         return "YOK"
 
-# ----------------- /EKLE -----------------
+# ----------ekle ----------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     text = message.text.strip()
@@ -98,29 +98,54 @@ async def ekle(client: Client, message: Message):
             # Pixeldrain linki varsa API linkine çevir
             api_link = pixeldrain_to_api(link) if "pixeldrain.com" in link else link
 
-            # Dosya boyutu al, erişilemezse "YOK"
+            # Dosya boyutu ve filename al
             try:
                 size = await filesize(api_link)
+                cd_filename = await filename_from_url(api_link)
+                if extra_info:
+                    meta_filename = extra_info
+                elif cd_filename:
+                    meta_filename = cd_filename
+                else:
+                    meta_filename = link.split("/")[-1]
             except:
                 size = "YOK"
+                meta_filename = extra_info if extra_info else link.split("/")[-1]
 
-            # Metadata filename: extra_info varsa onu kullan, yoksa linkten sonraki kısım
-            if extra_info:
-                meta_filename = extra_info
-            else:
-                meta_filename = " ".join(line.split()[1:]) if len(line.split()) > 1 else link.split("/")[-1]
-
+            # Metadata al
             meta = await metadata(
                 filename=meta_filename,
                 channel=message.chat.id,
                 msg_id=message.id
             )
 
+            # Metadata yoksa bile dosya adını kullan
             if not meta:
-                raise Exception("Metadata bulunamadı")
+                meta = {
+                    "media_type": "movie",
+                    "tmdb_id": None,
+                    "imdb_id": None,
+                    "title": meta_filename,
+                    "genres": [],
+                    "description": "",
+                    "rate": 0,
+                    "year": None,
+                    "poster": "",
+                    "backdrop": "",
+                    "logo": "",
+                    "cast": [],
+                    "runtime": 0,
+                    "season_number": 1,
+                    "episode_number": 1,
+                    "episode_title": meta_filename,
+                    "episode_backdrop": "",
+                    "episode_overview": "",
+                    "episode_released": None,
+                    "quality": "Unknown"
+                }
 
             telegram_obj = {
-                "quality": meta["quality"],
+                "quality": meta.get("quality", "Unknown"),
                 "id": api_link,
                 "name": meta_filename,
                 "size": size
@@ -206,6 +231,7 @@ async def ekle(client: Client, message: Message):
     await status.edit_text(
         f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
     )
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
