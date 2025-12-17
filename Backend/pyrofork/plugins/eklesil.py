@@ -8,19 +8,17 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from motor.motor_asyncio import AsyncIOMotorClient
-from themoviedb import aioTMDb
 import PTN
 
 from Backend.helper.custom_filter import CustomFilters
+from Backend.helper.metadata import metadata   # 🔴 KRİTİK
+from Backend.logger import LOGGER
 
 # ----------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip().startswith("mongodb")]
 MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
-
-TMDB_API = os.getenv("TMDB_API")
-tmdb = aioTMDb(key=TMDB_API, language="tr-TR", region="TR")
 
 # ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
@@ -29,18 +27,8 @@ movie_col = db["movie"]
 series_col = db["tv"]
 
 API_SEMAPHORE = asyncio.Semaphore(10)
-awaiting_confirmation = {}
 
 # ----------------- Helpers -----------------
-def safe(obj, attr, default=None):
-    return getattr(obj, attr, default) or default
-
-def year_from(date):
-    try:
-        return int(str(date).split("-")[0])
-    except Exception:
-        return None
-
 def pixeldrain_to_api(url: str) -> str:
     m = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     if not m:
@@ -67,162 +55,148 @@ async def filesize(url):
     size = int(size)
     for u in ["B", "KB", "MB", "GB"]:
         if size < 1024:
-            return f"{size:.2f} {u}"
+            return f"{size:.2f}{u}"
         size /= 1024
     return "YOK"
-
-# ----------------- Media Builder -----------------
-def build_media_record(meta, details, display_name, url, quality, media_type, season=None, episode=None, size="YOK"):
-    poster = f"https://image.tmdb.org/t/p/w500{safe(meta, 'poster_path', '')}"
-    backdrop = f"https://image.tmdb.org/t/p/w780{safe(meta, 'backdrop_path', '')}"
-
-    base = {
-        "tmdb_id": meta.id,
-        "imdb_id": safe(details, "imdb_id", ""),
-        "title": safe(meta, "title", safe(meta, "name")),
-        "description": safe(meta, "overview", ""),
-        "rating": safe(meta, "vote_average", 0),
-        "release_year": year_from(safe(meta, "release_date", safe(meta, "first_air_date"))),
-        "poster": poster,
-        "backdrop": backdrop,
-        "genres": [g.name for g in safe(details, "genres", [])],
-        "updated_on": str(datetime.utcnow()),
-    }
-
-    if media_type == "movie":
-        return {
-            **base,
-            "media_type": "movie",
-            "runtime": f"{safe(details,'runtime','?')} dk",
-            "telegram": [{
-                "quality": quality,
-                "id": url,
-                "name": display_name,
-                "size": size
-            }]
-        }
-
-    return {
-        **base,
-        "media_type": "tv",
-        "runtime": f"{safe(details,'episode_run_time',[None])[0]} dk",
-        "seasons": [{
-            "season_number": season,
-            "episodes": [{
-                "episode_number": episode,
-                "title": display_name,
-                "telegram": [{
-                    "quality": quality,
-                    "id": url,
-                    "name": display_name,
-                    "size": size
-                }]
-            }]
-        }]
-    }
 
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
+
     args = message.command[1:]
     if not args:
-        return await message.reply_text("Kullanım: /ekle link [özel isim]")
+        return await message.reply_text("Kullanım: /ekle pixeldrain_link")
 
-    msg = await message.reply_text("📥 İşlem başlatıldı...")
-    success, failed = [], []
+    status = await message.reply_text("📥 Metadata alınıyor...")
+    raw_link = args[0]
 
     try:
-        raw = pixeldrain_to_api(args[0])
-        custom_name = " ".join(args[1:]) if len(args) > 1 else None
+        api_link = pixeldrain_to_api(raw_link)
+        filename = await filename_from_url(api_link)
+        size = await filesize(api_link)
 
-        filename = await filename_from_url(raw)
-        parsed = PTN.parse(filename)
-
-        title = parsed.get("title")
-        if not title:
-            raise ValueError("Dosya isminden başlık çıkarılamadı")
-
-        season = parsed.get("season")
-        episode = parsed.get("episode")
-        quality = parsed.get("resolution") or "UNKNOWN"
-        size = await filesize(raw)
-
-        async with API_SEMAPHORE:
-            if season and episode:
-                results = await tmdb.search().tv(query=title)
-                media_type = "tv"
-                col = series_col
-            else:
-                results = await tmdb.search().movies(query=title)
-                media_type = "movie"
-                col = movie_col
-
-        if not results:
-            raise LookupError("TMDB arama sonucu boş döndü")
-
-        meta = results[0]
-        details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
-
-        doc = await col.find_one({"tmdb_id": meta.id})
-
-        if not doc:
-            doc = build_media_record(
-                meta, details, custom_name or filename,
-                raw, quality, media_type,
-                season, episode, size
-            )
-            await col.insert_one(doc)
-        else:
-            # basit ekleme (çakışma yok)
-            if media_type == "movie":
-                doc["telegram"].append({
-                    "quality": quality,
-                    "id": raw,
-                    "name": custom_name or filename,
-                    "size": size
-                })
-            else:
-                s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
-                if not s:
-                    s = {"season_number": season, "episodes": []}
-                    doc["seasons"].append(s)
-
-                e = next((x for x in s["episodes"] if x["episode_number"] == episode), None)
-                if not e:
-                    e = {"episode_number": episode, "title": filename, "telegram": []}
-                    s["episodes"].append(e)
-
-                e["telegram"].append({
-                    "quality": quality,
-                    "id": raw,
-                    "name": filename,
-                    "size": size
-                })
-
-            doc["updated_on"] = str(datetime.utcnow())
-            await col.replace_one({"_id": doc["_id"]}, doc)
-
-        success.append(filename)
-
-    except Exception as e:
-        failed.append(str(e))
-        await message.reply_text(
-            "❌ **EKLEME BAŞARISIZ**\n\n"
-            f"📄 Dosya: `{args[0]}`\n"
-            f"🧩 Hata Tipi: `{type(e).__name__}`\n"
-            f"📛 Açıklama: `{str(e)}`\n\n"
-            "🔎 Olası Nedenler:\n"
-            "- Pixeldrain dosyası erişilemiyor\n"
-            "- Dosya adı parse edilemedi\n"
-            "- TMDB eşleşmesi bulunamadı\n"
-            "- TMDB API limiti / key hatası"
+        # 🔴 METADATA.PY ÇAĞRISI
+        meta = await metadata(
+            filename=filename,
+            channel=message.chat.id,
+            msg_id=message.id
         )
 
-    await msg.edit_text(
-        f"📊 **Tamamlandı**\n\n"
-        f"✅ Başarılı: {len(success)}\n"
-        f"❌ Başarısız: {len(failed)}"
-    )
+        if not meta:
+            raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
+
+        # ----------------- MOVIE -----------------
+        if meta["media_type"] == "movie":
+            col = movie_col
+            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+
+            telegram_obj = {
+                "quality": meta["quality"],
+                "id": api_link,
+                "name": filename,
+                "size": size
+            }
+
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "movie",
+                    "updated_on": str(datetime.utcnow()),
+                    "telegram": [telegram_obj]
+                }
+                await col.insert_one(doc)
+            else:
+                doc["telegram"].append(telegram_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
+
+        # ----------------- TV -----------------
+        else:
+            col = series_col
+            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+
+            telegram_obj = {
+                "quality": meta["quality"],
+                "id": api_link,
+                "name": filename,
+                "size": size
+            }
+
+            episode_obj = {
+                "episode_number": meta["episode_number"],
+                "title": meta["episode_title"],
+                "episode_backdrop": meta["episode_backdrop"],
+                "overview": meta["episode_overview"],
+                "released": meta["episode_released"],
+                "telegram": [telegram_obj]
+            }
+
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "tv",
+                    "updated_on": str(datetime.utcnow()),
+                    "seasons": [{
+                        "season_number": meta["season_number"],
+                        "episodes": [episode_obj]
+                    }]
+                }
+                await col.insert_one(doc)
+
+            else:
+                season = next(
+                    (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
+                    None
+                )
+                if not season:
+                    season = {
+                        "season_number": meta["season_number"],
+                        "episodes": []
+                    }
+                    doc["seasons"].append(season)
+
+                season["episodes"].append(episode_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
+
+        await status.edit_text("✅ **Ekleme başarılı**")
+
+    except Exception as e:
+        LOGGER.exception(e)
+        await status.edit_text(
+            "❌ **EKLEME BAŞARISIZ**\n\n"
+            f"📛 Hata: `{type(e).__name__}`\n"
+            f"📄 Açıklama: `{str(e)}`\n\n"
+            "🔎 Olası nedenler:\n"
+            "- Dosya adı parse edilemedi\n"
+            "- IMDb / TMDB eşleşmesi bulunamadı\n"
+            "- metadata.py None döndürdü\n"
+            "- Pixeldrain erişim sorunu"
+        )
 
 # ----------------- /SİL -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
