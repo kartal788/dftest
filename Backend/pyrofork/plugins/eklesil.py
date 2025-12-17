@@ -62,128 +62,173 @@ async def filesize(url):
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
-
     args = message.command[1:]
     if not args:
-        return await message.reply_text("Kullanım: /ekle pixeldrain_link")
+        return await message.reply_text("Kullanım: /ekle pixeldrain_link1 pixeldrain_link2 ...")
 
     status = await message.reply_text("📥 Metadata alınıyor...")
-    raw_link = args[0]
 
-    try:
-        api_link = pixeldrain_to_api(raw_link)
-        filename = await filename_from_url(api_link)
-        size = await filesize(api_link)
+    # Dosyaların bilgilerini kaydedeceğimiz bir liste
+    added_files = []
 
-        # 🔴 METADATA.PY ÇAĞRISI
-        meta = await metadata(
-            filename=filename,
-            channel=message.chat.id,
-            msg_id=message.id
-        )
+    for raw_link in args:
+        try:
+            api_link = pixeldrain_to_api(raw_link)
+            filename = await filename_from_url(api_link)
+            size = await filesize(api_link)
 
-        if not meta:
-            raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
+            # 🔴 METADATA.PY ÇAĞRISI
+            meta = await metadata(
+                filename=filename,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
-        # ----------------- MOVIE -----------------
-        if meta["media_type"] == "movie":
-            col = movie_col
-            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+            if not meta:
+                raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
 
-            telegram_obj = {
-                "quality": meta["quality"],
-                "id": api_link,
-                "name": filename,
-                "size": size
-            }
+            # ----------------- MOVIE -----------------
+            if meta["media_type"] == "movie":
+                col = movie_col
+                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
 
-            if not doc:
-                doc = {
-                    "tmdb_id": meta["tmdb_id"],
-                    "imdb_id": meta["imdb_id"],
-                    "db_index": 1,
-                    "title": meta["title"],
-                    "genres": meta["genres"],
-                    "description": meta["description"],
-                    "rating": meta["rate"],
-                    "release_year": meta["year"],
-                    "poster": meta["poster"],
-                    "backdrop": meta["backdrop"],
-                    "logo": meta["logo"],
-                    "cast": meta["cast"],
-                    "runtime": meta["runtime"],
-                    "media_type": "movie",
-                    "updated_on": str(datetime.utcnow()),
+                telegram_obj = {
+                    "quality": meta["quality"],
+                    "id": api_link,
+                    "name": filename,
+                    "size": size
+                }
+
+                if not doc:
+                    doc = {
+                        "tmdb_id": meta["tmdb_id"],
+                        "imdb_id": meta["imdb_id"],
+                        "db_index": 1,
+                        "title": meta["title"],
+                        "genres": meta["genres"],
+                        "description": meta["description"],
+                        "rating": meta["rate"],
+                        "release_year": meta["year"],
+                        "poster": meta["poster"],
+                        "backdrop": meta["backdrop"],
+                        "logo": meta["logo"],
+                        "cast": meta["cast"],
+                        "runtime": meta["runtime"],
+                        "media_type": "movie",
+                        "updated_on": str(datetime.utcnow()),
+                        "telegram": [telegram_obj]
+                    }
+                    await col.insert_one(doc)
+                else:
+                    doc["telegram"].append(telegram_obj)
+                    doc["updated_on"] = str(datetime.utcnow())
+                    await col.replace_one({"_id": doc["_id"]}, doc)
+
+            # ----------------- TV -----------------
+            else:
+                col = series_col
+                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+
+                telegram_obj = {
+                    "quality": meta["quality"],
+                    "id": api_link,
+                    "name": filename,
+                    "size": size
+                }
+
+                episode_obj = {
+                    "episode_number": meta["episode_number"],
+                    "title": meta["episode_title"],
+                    "episode_backdrop": meta["episode_backdrop"],
+                    "overview": meta["episode_overview"],
+                    "released": meta["episode_released"],
                     "telegram": [telegram_obj]
                 }
-                await col.insert_one(doc)
-            else:
-                doc["telegram"].append(telegram_obj)
-                doc["updated_on"] = str(datetime.utcnow())
-                await col.replace_one({"_id": doc["_id"]}, doc)
 
-        # ----------------- TV -----------------
-        else:
-            col = series_col
-            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
-
-            telegram_obj = {
-                "quality": meta["quality"],
-                "id": api_link,
-                "name": filename,
-                "size": size
-            }
-
-            episode_obj = {
-                "episode_number": meta["episode_number"],
-                "title": meta["episode_title"],
-                "episode_backdrop": meta["episode_backdrop"],
-                "overview": meta["episode_overview"],
-                "released": meta["episode_released"],
-                "telegram": [telegram_obj]
-            }
-
-            if not doc:
-                doc = {
-                    "tmdb_id": meta["tmdb_id"],
-                    "imdb_id": meta["imdb_id"],
-                    "db_index": 1,
-                    "title": meta["title"],
-                    "genres": meta["genres"],
-                    "description": meta["description"],
-                    "rating": meta["rate"],
-                    "release_year": meta["year"],
-                    "poster": meta["poster"],
-                    "backdrop": meta["backdrop"],
-                    "logo": meta["logo"],
-                    "cast": meta["cast"],
-                    "runtime": meta["runtime"],
-                    "media_type": "tv",
-                    "updated_on": str(datetime.utcnow()),
-                    "seasons": [{
-                        "season_number": meta["season_number"],
-                        "episodes": [episode_obj]
-                    }]
-                }
-                await col.insert_one(doc)
-
-            else:
-                season = next(
-                    (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
-                    None
-                )
-                if not season:
-                    season = {
-                        "season_number": meta["season_number"],
-                        "episodes": []
+                if not doc:
+                    doc = {
+                        "tmdb_id": meta["tmdb_id"],
+                        "imdb_id": meta["imdb_id"],
+                        "db_index": 1,
+                        "title": meta["title"],
+                        "genres": meta["genres"],
+                        "description": meta["description"],
+                        "rating": meta["rate"],
+                        "release_year": meta["year"],
+                        "poster": meta["poster"],
+                        "backdrop": meta["backdrop"],
+                        "logo": meta["logo"],
+                        "cast": meta["cast"],
+                        "runtime": meta["runtime"],
+                        "media_type": "tv",
+                        "updated_on": str(datetime.utcnow()),
+                        "seasons": [{
+                            "season_number": meta["season_number"],
+                            "episodes": [episode_obj]
+                        }]
                     }
-                    doc["seasons"].append(season)
+                    await col.insert_one(doc)
 
-                season["episodes"].append(episode_obj)
-                doc["updated_on"] = str(datetime.utcnow())
-                await col.replace_one({"_id": doc["_id"]}, doc)
+                else:
+                    season = next(
+                        (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
+                        None
+                    )
+                    if not season:
+                        season = {
+                            "season_number": meta["season_number"],
+                            "episodes": []
+                        }
+                        doc["seasons"].append(season)
 
+                    season["episodes"].append(episode_obj)
+                    doc["updated_on"] = str(datetime.utcnow())
+                    await col.replace_one({"_id": doc["_id"]}, doc)
+
+            # Dosya bilgisini eklenenler.txt'ye kaydediyoruz
+            file_info = f"🎬 Başlık: {meta['title']}\n📄 Ad: {filename}\n📊 Boyut: {size}\n🔧 Kalite: {meta['quality']}\n\n"
+            added_files.append(file_info)
+
+        except Exception as e:
+            LOGGER.exception(e)
+            await status.edit_text(
+                "❌ **EKLEME BAŞARISIZ**\n\n"
+                f"📛 Hata: `{type(e).__name__}`\n"
+                f"📄 Açıklama: `{str(e)}`\n\n"
+                "🔎 Olası nedenler:\n"
+                "- Dosya adı parse edilemedi\n"
+                "- IMDb / TMDB eşleşmesi bulunamadı\n"
+                "- metadata.py None döndürdü\n"
+                "- Pixeldrain erişim sorunu"
+            )
+            break  # Eğer bir dosyada hata olursa, döngü durdurulabilir
+
+    # Eğer 2'den fazla dosya eklenmişse, bunları "/tmp/eklenenler.txt" dosyasına yazalım
+    if len(added_files) > 1:
+        # Dosyaları "/tmp/eklenenler.txt" dosyasına yazıyoruz
+        tmp_file_path = "/tmp/eklenenler.txt"
+        with open(tmp_file_path, "w") as file:
+            file.writelines(added_files)
+
+        # Dosyayı Telegram'a gönderelim
+        await client.send_document(
+            chat_id=message.chat.id,
+            document=tmp_file_path,
+            caption="Ekleme başarılı! İşte eklenen dosyalar."
+        )
+
+        # Dosyayı Telegram'a gönderdikten sonra sil
+        os.remove(tmp_file_path)
+
+        # Dosyalar 15 saniye arayla gönderilecek
+        for file_info in added_files:
+            await message.reply_text(f"✅ **Ekleme başarılı**\n\n{file_info}")
+            await asyncio.sleep(15)  # 15 saniye bekle
+
+    else:
+        # Tek dosya eklenmişse, hemen ekleyelim
         await status.edit_text("✅ **Ekleme başarılı**")
+
 
     except Exception as e:
         LOGGER.exception(e)
