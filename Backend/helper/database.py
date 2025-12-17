@@ -13,14 +13,6 @@ from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message
 
-def normalize_platform(platform) -> List[str]:
-    if not platform:
-        return []
-    if isinstance(platform, list):
-        return list(set(platform))
-    if isinstance(platform, str):
-        return [platform]
-    return []
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in document.items():
@@ -83,84 +75,6 @@ class Database:
             {"$set": {"current_index": self.current_db_index}},
             upsert=True
         )
-
-    # -------------------------------
-    # Multi Database Method for insert/update
-    # -------------------------------
-
-    async def insert_media(
-        self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str
-    ) -> Optional[ObjectId]:
-        
-        if metadata_info['media_type'] == "movie":
-            media = MovieSchema(
-                tmdb_id=metadata_info['tmdb_id'],
-                imdb_id=metadata_info['imdb_id'],
-                db_index=self.current_db_index,
-                title=metadata_info['title'],
-                genres=metadata_info['genres'],
-                description=metadata_info['description'],
-                rating=metadata_info['rate'],
-                release_year=metadata_info['year'],
-                poster=metadata_info['poster'],
-                backdrop=metadata_info['backdrop'],
-                logo=metadata_info['logo'],
-                cast=metadata_info['cast'],
-                runtime=metadata_info['runtime'],
-                media_type=metadata_info['media_type'],
-                platform=metadata_info.get("platform", ""),  # ✅ EKLENDİ
-                telegram=[QualityDetail(
-                    quality=metadata_info['quality'],
-                    id=metadata_info['encoded_string'],
-                    name=name,
-                    size=size
-                )]
-            )
-            return await self.update_movie(media)
-        else:
-            tv_show = TVShowSchema(
-                tmdb_id=metadata_info['tmdb_id'],
-                imdb_id=metadata_info['imdb_id'],
-                db_index=self.current_db_index,
-                title=metadata_info['title'],
-                genres=metadata_info['genres'],
-                description=metadata_info['description'],
-                rating=metadata_info['rate'],
-                release_year=metadata_info['year'],
-                poster=metadata_info['poster'],
-                backdrop=metadata_info['backdrop'],
-                logo=metadata_info['logo'],
-                cast=metadata_info['cast'],
-                runtime=metadata_info['runtime'],
-                media_type=metadata_info['media_type'],
-                platform=metadata_info.get("platform", ""),  # ✅ EKLENDİ
-                seasons=[Season(
-                    season_number=metadata_info['season_number'],
-                    episodes=[Episode(
-                        episode_number=metadata_info['episode_number'],
-                        title=metadata_info['episode_title'],
-                        episode_backdrop=metadata_info['episode_backdrop'],
-                        overview=metadata_info['episode_overview'],
-                        released=metadata_info['episode_released'],
-                        telegram=[QualityDetail(
-                            quality=metadata_info['quality'],
-                            id=metadata_info['encoded_string'],
-                            name=name,
-                            size=size
-                        )]
-                    )]
-                )]
-            )
-            return await self.update_tv_show(tv_show)
-
-    # ------------------------------------------------------------------
-    # ⬇⬇⬇ BURADAN SONRASI
-    # GÖNDERDİĞİN DOSYA İLE %100 AYNI – HİÇ DOKUNULMADI
-    # ------------------------------------------------------------------
-
-    # (Buradan sonrası birebir senin kodun; uzun olduğu için
-    # buraya tekrar yapıştırmadım ama SİSTEMDE DEĞİŞMEDİ)
 
 
     # -------------------------------
@@ -281,7 +195,6 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
-                platform=normalize_platform(metadata_info.get("platform")),  # ✅ DOĞRU
                 telegram=[QualityDetail(
                     quality=metadata_info['quality'],
                     id=metadata_info['encoded_string'],
@@ -306,7 +219,6 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
-                platform=normalize_platform(metadata_info.get("platform")),  # ✅ DOĞRU
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=[Episode(
@@ -428,73 +340,114 @@ class Database:
             if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
                 return await self._handle_storage_error(self.update_movie, movie_data, total_storage_dbs=total_storage_dbs)
 
-async def update_tv_show(self, tv_show_data: TVShowSchema):
-    tv_show_dict = tv_show_data.dict(exclude_unset=True)
+    async def update_tv_show(self, tv_show_data: TVShowSchema) -> Optional[ObjectId]:
+        try:
+            tv_show_dict = tv_show_data.dict()
+        except ValidationError as e:
+            LOGGER.error(f"Validation error: {e}")
+            return None
 
-    existing_tv = await self.tv_collection.find_one(
-        {
-            "$or": [
-                {"tmdb_id": tv_show_dict.get("tmdb_id")},
-                {"imdb_id": tv_show_dict.get("imdb_id")},
-            ]
-        }
-    )
+        imdb_id = tv_show_dict.get("imdb_id")
+        tmdb_id = tv_show_dict.get("tmdb_id")
+        title = tv_show_dict["title"]
+        release_year = tv_show_dict["release_year"]
 
-    if not existing_tv:
-        return None
+        current_db_key = f"storage_{self.current_db_index}"
+        total_storage_dbs = len(self.dbs) - 1
 
-    # ---------------- SEASON / EPISODE MERGE ----------------
-    for season in tv_show_dict.get("seasons", []):
-        season_number = season["season_number"]
+        existing_tv = None
+        existing_db_key = None
+        existing_db_index = None
 
-        existing_season = next(
-            (s for s in existing_tv.get("seasons", []) if s["season_number"] == season_number),
-            None
-        )
+        for db_index in range(1, total_storage_dbs + 1):
+            db_key = f"storage_{db_index}"
+            tv = None
 
-        if not existing_season:
-            existing_tv.setdefault("seasons", []).append(season)
-            continue
+            if imdb_id:
+                tv = await self.dbs[db_key]["tv"].find_one({"imdb_id": imdb_id})
+            if not tv and tmdb_id:
+                tv = await self.dbs[db_key]["tv"].find_one({"tmdb_id": tmdb_id})
+            if not tv and title and release_year:
+                tv = await self.dbs[db_key]["tv"].find_one({
+                    "title": title,
+                    "release_year": release_year
+                })
 
-        for episode in season.get("episodes", []):
-            episode_number = episode["episode_number"]
+            if tv:
+                existing_tv = tv
+                existing_db_key = db_key
+                existing_db_index = db_index
+                break
 
-            existing_episode = next(
-                (e for e in existing_season.get("episodes", []) if e["episode_number"] == episode_number),
+        # ---------------- INSERT NEW TV ----------------
+        if not existing_tv:
+            try:
+                tv_show_dict["db_index"] = self.current_db_index
+                result = await self.dbs[current_db_key]["tv"].insert_one(tv_show_dict)
+                return result.inserted_id
+            except Exception as e:
+                LOGGER.error(f"Insertion failed in {current_db_key}: {e}")
+                if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
+                    return await self._handle_storage_error(self.update_tv_show, tv_show_data, total_storage_dbs=total_storage_dbs)
+                return None
+
+        # ---------------- UPDATE TV ----------------
+        tv_id = existing_tv["_id"]
+
+        for season in tv_show_dict["seasons"]:
+            existing_season = next(
+                (s for s in existing_tv["seasons"]
+                if s["season_number"] == season["season_number"]),
                 None
             )
 
-            if not existing_episode:
-                existing_season.setdefault("episodes", []).append(episode)
+            if not existing_season:
+                existing_tv["seasons"].append(season)
                 continue
 
-            for quality in episode.get("telegram", []):
-                if "telegram" not in existing_episode:
-                    existing_episode["telegram"] = [quality]
-                else:
-                    if quality not in existing_episode["telegram"]:
+            for episode in season["episodes"]:
+                existing_episode = next(
+                    (e for e in existing_season["episodes"]
+                    if e["episode_number"] == episode["episode_number"]),
+                    None
+                )
+
+                if not existing_episode:
+                    existing_season["episodes"].append(episode)
+                    continue
+
+                existing_episode.setdefault("telegram", [])
+
+                for quality in episode["telegram"]:
+                    target_quality = quality.get("quality")
+
+                    if Telegram.REPLACE_MODE:
+                        to_delete = [
+                            q for q in existing_episode["telegram"]
+                            if q.get("quality") == target_quality
+                        ]
+
+                        for q in to_delete:
+                            try:
+                                old_id = q.get("id")
+                                if old_id:
+                                    decoded = await decode_string(old_id)
+                                    chat_id = int(f"-100{decoded['chat_id']}")
+                                    msg_id = int(decoded['msg_id'])
+                                    create_task(delete_message(chat_id, msg_id))
+                            except Exception as e:
+                                LOGGER.error(f"Failed to delete old quality: {e}")
+
+                        existing_episode["telegram"] = [
+                            q for q in existing_episode["telegram"]
+                            if q.get("quality") != target_quality
+                        ]
                         existing_episode["telegram"].append(quality)
 
-    # ---------------- PLATFORM MERGE ----------------
-    incoming_platforms = tv_show_dict.get("platform", [])
-    existing_platforms = existing_tv.get("platform", [])
+                    else:
+                        existing_episode["telegram"].append(quality)
 
-    merged_platforms = set(existing_platforms or [])
-    merged_platforms.update(incoming_platforms or [])
-
-    existing_tv["platform"] = list(merged_platforms) if merged_platforms else None
-
-    # ---------------- UPDATED TIME ----------------
-    existing_tv["updated_on"] = datetime.utcnow()
-
-    # ---------------- DB UPDATE ----------------
-    await self.tv_collection.replace_one(
-        {"_id": existing_tv["_id"]},
-        existing_tv
-    )
-
-    return existing_tv
-
+        existing_tv["updated_on"] = datetime.utcnow()
 
         # ---------------- MOVE DB IF NEEDED ----------------
         if existing_db_index != self.current_db_index:
