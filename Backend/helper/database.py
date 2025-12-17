@@ -22,8 +22,6 @@ def normalize_platform(platform) -> List[str]:
         return [platform]
     return []
 
-
-
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in document.items():
         if isinstance(value, ObjectId):
@@ -283,6 +281,7 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
+                platform=normalize_platform(metadata_info.get("platform")),  # ✅ DOĞRU
                 telegram=[QualityDetail(
                     quality=metadata_info['quality'],
                     id=metadata_info['encoded_string'],
@@ -307,6 +306,7 @@ class Database:
                 cast=metadata_info['cast'],
                 runtime=metadata_info['runtime'],
                 media_type=metadata_info['media_type'],
+                platform=normalize_platform(metadata_info.get("platform")),  # ✅ DOĞRU
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=[Episode(
@@ -534,6 +534,14 @@ class Database:
 
                     else:
                         existing_episode["telegram"].append(quality)
+# ---------------- PLATFORM MERGE ----------------
+incoming_platforms = tv_show_dict.get("platform", [])
+existing_platforms = existing_tv.get("platform", [])
+
+merged_platforms = set(existing_platforms or [])
+merged_platforms.update(incoming_platforms or [])
+
+existing_tv["platform"] = list(merged_platforms) if merged_platforms else None
 
         existing_tv["updated_on"] = datetime.utcnow()
 
