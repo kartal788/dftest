@@ -8,10 +8,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from motor.motor_asyncio import AsyncIOMotorClient
-import PTN
-
 from Backend.helper.custom_filter import CustomFilters
-from Backend.helper.metadata import metadata   # 🔴 KRİTİK
+from Backend.helper.metadata import metadata
 from Backend.logger import LOGGER
 
 # ----------------- ENV -----------------
@@ -25,8 +23,6 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 movie_col = db["movie"]
 series_col = db["tv"]
-
-API_SEMAPHORE = asyncio.Semaphore(10)
 
 # ----------------- Helpers -----------------
 def pixeldrain_to_api(url: str) -> str:
@@ -63,167 +59,174 @@ async def filesize(url):
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     args = message.command[1:]
+
     if not args:
-        return await message.reply_text("Kullanım: /ekle pixeldrain_link1 pixeldrain_link2 ...")
+        return await message.reply_text(
+            "Kullanım:\n"
+            "/ekle pixeldrain_link [imdb_id | tmdb_id | filename]"
+        )
 
     status = await message.reply_text("📥 Metadata alınıyor...")
 
-    added_files = []  # Başarıyla eklenen dosyaların listesi
-    failed_files = []  # Başarısız olan dosyaların listesi
-    movie_count = 0  # Eklenen film sayısı
-    series_count = 0  # Eklenen dizi sayısı
+    added = []
+    failed = []
+    movie_count = 0
+    series_count = 0
 
-    for raw_link in args:
-        try:
-            # Pixeldrain linkini API linkine çevir
-            api_link = pixeldrain_to_api(raw_link)
-            filename = await filename_from_url(api_link)
-            size = await filesize(api_link)
+    # ----------- ARGÜMANLAR -----------
+    pixeldrain_link = args[0]
+    extra_info = args[1] if len(args) > 1 else None
 
-            # Linkle birlikte dosya ismi, TMDB ID, veya IMDB ID verilmişse, bunlarla metadata sorgusu yapalım
-            meta = None
-            for info in args[1:]:  # İlk argüman Pixeldrain linki olduğu için, geri kalanlar metadata bilgisi olabilir
-                if re.match(r"^tt\d+$", info):  # IMDB ID formatı: tt1234567
-                    meta = await metadata(imdb_id=info, channel=message.chat.id, msg_id=message.id)
-                    if meta:
-                        break
-                elif re.match(r"^\d+$", info):  # TMDB ID formatı: 123456
-                    meta = await metadata(tmdb_id=info, channel=message.chat.id, msg_id=message.id)
-                    if meta:
-                        break
-                else:  # Eğer bir dosya ismi verilmişse, isme göre metadata araştıralım
-                    meta = await metadata(filename=filename, channel=message.chat.id, msg_id=message.id)
-                    if meta:
-                        break
+    try:
+        api_link = pixeldrain_to_api(pixeldrain_link)
+        real_filename = await filename_from_url(api_link)
+        size = await filesize(api_link)
 
-            # Eğer metadata hala bulunamadıysa, Pixeldrain linkinden metadata alalım
-            if not meta:
-                meta = await metadata(filename=filename, channel=message.chat.id, msg_id=message.id)
+        # ----------- METADATA SEÇİMİ -----------
+        meta = None
 
-            if not meta:
-                raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
+        # 1️⃣ IMDB ID
+        if extra_info and re.match(r"^tt\d+$", extra_info):
+            meta = await metadata(
+                imdb_id=extra_info,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
-            # ----------------- MOVIE -----------------
-            if meta["media_type"] == "movie":
-                col = movie_col
-                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+        # 2️⃣ TMDB ID
+        elif extra_info and re.match(r"^\d+$", extra_info):
+            meta = await metadata(
+                tmdb_id=extra_info,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
-                telegram_obj = {
-                    "quality": meta["quality"],
-                    "id": api_link,
-                    "name": filename,
-                    "size": size
-                }
+        # 3️⃣ Kullanıcı filename
+        elif extra_info:
+            meta = await metadata(
+                filename=extra_info,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
-                if not doc:
-                    doc = {
-                        "tmdb_id": meta["tmdb_id"],
-                        "imdb_id": meta["imdb_id"],
-                        "db_index": 1,
-                        "title": meta["title"],
-                        "genres": meta["genres"],
-                        "description": meta["description"],
-                        "rating": meta["rate"],
-                        "release_year": meta["year"],
-                        "poster": meta["poster"],
-                        "backdrop": meta["backdrop"],
-                        "logo": meta["logo"],
-                        "cast": meta["cast"],
-                        "runtime": meta["runtime"],
-                        "media_type": "movie",
-                        "updated_on": str(datetime.utcnow()),
-                        "telegram": [telegram_obj]
-                    }
-                    await col.insert_one(doc)
-                else:
-                    doc["telegram"].append(telegram_obj)
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
+        # 4️⃣ Pixeldrain filename (fallback)
+        if not meta:
+            meta = await metadata(
+                filename=real_filename,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
-                added_files.append(filename)
-                movie_count += 1
+        if not meta:
+            raise ValueError("Metadata bulunamadı")
 
-            # ----------------- TV -----------------
-            else:
-                col = series_col
-                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+        telegram_obj = {
+            "quality": meta["quality"],
+            "id": api_link,
+            "name": real_filename,
+            "size": size
+        }
 
-                telegram_obj = {
-                    "quality": meta["quality"],
-                    "id": api_link,
-                    "name": filename,
-                    "size": size
-                }
+        # ----------------- MOVIE -----------------
+        if meta["media_type"] == "movie":
+            doc = await movie_col.find_one({"tmdb_id": meta["tmdb_id"]})
 
-                episode_obj = {
-                    "episode_number": meta["episode_number"],
-                    "title": meta["episode_title"],
-                    "episode_backdrop": meta["episode_backdrop"],
-                    "overview": meta["episode_overview"],
-                    "released": meta["episode_released"],
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "movie",
+                    "updated_on": str(datetime.utcnow()),
                     "telegram": [telegram_obj]
                 }
+                await movie_col.insert_one(doc)
+            else:
+                doc["telegram"].append(telegram_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await movie_col.replace_one({"_id": doc["_id"]}, doc)
 
-                if not doc:
-                    doc = {
-                        "tmdb_id": meta["tmdb_id"],
-                        "imdb_id": meta["imdb_id"],
-                        "db_index": 1,
-                        "title": meta["title"],
-                        "genres": meta["genres"],
-                        "description": meta["description"],
-                        "rating": meta["rate"],
-                        "release_year": meta["year"],
-                        "poster": meta["poster"],
-                        "backdrop": meta["backdrop"],
-                        "logo": meta["logo"],
-                        "cast": meta["cast"],
-                        "runtime": meta["runtime"],
-                        "media_type": "tv",
-                        "updated_on": str(datetime.utcnow()),
-                        "seasons": [{
-                            "season_number": meta["season_number"],
-                            "episodes": [episode_obj]
-                        }]
+            movie_count += 1
+
+        # ----------------- TV -----------------
+        else:
+            doc = await series_col.find_one({"tmdb_id": meta["tmdb_id"]})
+
+            episode_obj = {
+                "episode_number": meta["episode_number"],
+                "title": meta["episode_title"],
+                "episode_backdrop": meta["episode_backdrop"],
+                "overview": meta["episode_overview"],
+                "released": meta["episode_released"],
+                "telegram": [telegram_obj]
+            }
+
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "tv",
+                    "updated_on": str(datetime.utcnow()),
+                    "seasons": [{
+                        "season_number": meta["season_number"],
+                        "episodes": [episode_obj]
+                    }]
+                }
+                await series_col.insert_one(doc)
+            else:
+                season = next(
+                    (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
+                    None
+                )
+                if not season:
+                    season = {
+                        "season_number": meta["season_number"],
+                        "episodes": []
                     }
-                    await col.insert_one(doc)
+                    doc["seasons"].append(season)
 
-                else:
-                    season = next(
-                        (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
-                        None
-                    )
-                    if not season:
-                        season = {
-                            "season_number": meta["season_number"],
-                            "episodes": []
-                        }
-                        doc["seasons"].append(season)
+                season["episodes"].append(episode_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await series_col.replace_one({"_id": doc["_id"]}, doc)
 
-                    season["episodes"].append(episode_obj)
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
+            series_count += 1
 
-                added_files.append(filename)
-                series_count += 1
+        added.append(real_filename)
 
-        except Exception as e:
-            LOGGER.exception(e)
-            failed_files.append(filename)
-            continue  # Hata durumunda bir sonraki dosyaya geç
+    except Exception as e:
+        LOGGER.exception(e)
+        failed.append(pixeldrain_link)
 
-    # Son olarak eklenen ve başarısız olan dosyaların bildirilmesi
-    await asyncio.sleep(15)
-
-    if len(added_files) <= 10:
-        added_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(added_files)])
-        failed_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(failed_files)])
-        message_text = f"Eklenenler:\n{added_message}\n\nBaşarısız:\n{failed_message}"
+    # ----------------- SONUÇ -----------------
+    if added:
+        await status.edit_text(
+            "✅ İşlem tamamlandı\n\n"
+            f"🎬 Film: {movie_count}\n"
+            f"📺 Dizi: {series_count}"
+        )
     else:
-        message_text = f"Eklenenler:\nFilm: {movie_count}\nDizi: {series_count}"
-
-    await status.edit_text(message_text)
-
+        await status.edit_text("❌ Hiçbir dosya eklenemedi")
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
@@ -249,9 +252,10 @@ async def sil(client: Client, message: Message):
         "İptal etmek için **Hayır** yaz."
     )
 
+
 @Client.on_message(
-    filters.private & 
-    CustomFilters.owner & 
+    filters.private &
+    CustomFilters.owner &
     filters.regex("(?i)^(evet|hayır)$")
 )
 async def sil_onay(client: Client, message: Message):
