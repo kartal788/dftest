@@ -168,14 +168,8 @@ async def ekle(client: Client, message: Message):
                     }
                     await movie_col.insert_one(doc)
                 else:
-                    updated = False
-                    for t in doc["telegram"]:
-                        if str(t["id"]).startswith("http") and t["name"] == meta_filename:
-                            t.update(telegram_obj)
-                            updated = True
-                            break
-                    if not updated:
-                        doc["telegram"].append(telegram_obj)
+                    # Aynı quality veya id farketmeksizin her zaman ekle
+                    doc["telegram"].append(telegram_obj)
                     doc["updated_on"] = str(datetime.utcnow())
                     await movie_col.replace_one({"_id": doc["_id"]}, doc)
                 movie_count += 1
@@ -221,18 +215,12 @@ async def ekle(client: Client, message: Message):
                         season = {"season_number": meta["season_number"], "episodes": []}
                         doc["seasons"].append(season)
 
-                    existing_ep = next((e for e in season["episodes"] if e["title"] == meta_filename), None)
-                    if existing_ep:
-                        updated = False
-                        for t in existing_ep["telegram"]:
-                            if str(t["id"]).startswith("http"):
-                                t.update(telegram_obj)
-                                updated = True
-                                break
-                        if not updated:
-                            existing_ep["telegram"].append(telegram_obj)
-                    else:
+                    ep = next((e for e in season["episodes"] if e["episode_number"] == meta["episode_number"]), None)
+                    if not ep:
                         season["episodes"].append(episode_obj)
+                    else:
+                        # Aynı bölüm için her zaman yeni telegram objesi ekle
+                        ep["telegram"].append(telegram_obj)
 
                     doc["updated_on"] = str(datetime.utcnow())
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
@@ -245,16 +233,13 @@ async def ekle(client: Client, message: Message):
 
     # ----------------- Mesaj formatı -----------------
     if len(added_movies) + len(added_series) > 15:
-        # Eski tasarım: sadece sayı göster
         result_text = f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
     else:
-        # Yeni tasarım: isimleri de listele
         movies_text = "\n".join(f"🎬 {name}" for name in added_movies)
         series_text = "\n".join(f"📺 {name}" for name in added_series)
         result_text = f"✅ İşlem tamamlandı\n\n{movies_text}\n{series_text}\n❌ Hatalı: {len(failed)}"
 
     await status.edit_text(result_text)
-
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
