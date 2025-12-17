@@ -233,11 +233,16 @@ async def ekle(client: Client, message: Message):
             await client.send_document(
                 message.chat.id, 
                 file, 
-                caption="İşte eklenen dosyalarla ilgili bilgiler:"
+                caption=f"{len(args)} dosya eklendi."
             )
         
         # Dosyayı gönderimden sonra siliyoruz
         os.remove(file_path)
+
+    # Eğer 2'den fazla dosya eklenmemişse ve sadece 1-2 dosya eklenmişse
+    else:
+        # Status mesajı silinmeden önce sadece bilgiler gönderiyoruz.
+        await status.delete()
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
