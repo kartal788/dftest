@@ -68,6 +68,11 @@ async def ekle(client: Client, message: Message):
 
     status = await message.reply_text("📥 Metadata alınıyor...")
 
+    added_files = []  # List of successfully added files
+    failed_files = []  # List of failed files
+    movie_count = 0  # Number of movies added
+    series_count = 0  # Number of series added
+
     for raw_link in args:
         try:
             api_link = pixeldrain_to_api(raw_link)
@@ -120,6 +125,9 @@ async def ekle(client: Client, message: Message):
                     doc["telegram"].append(telegram_obj)
                     doc["updated_on"] = str(datetime.utcnow())
                     await col.replace_one({"_id": doc["_id"]}, doc)
+
+                added_files.append(filename)
+                movie_count += 1
 
             # ----------------- TV -----------------
             else:
@@ -182,8 +190,29 @@ async def ekle(client: Client, message: Message):
                     doc["updated_on"] = str(datetime.utcnow())
                     await col.replace_one({"_id": doc["_id"]}, doc)
 
-            # Feedback for each successful file processed
-            await status.edit_text(f"✅ **{filename}** başarıyla eklendi!")
+                added_files.append(filename)
+                series_count += 1
+
+        except Exception as e:
+            LOGGER.exception(e)
+            failed_files.append(filename)
+            continue  # Skip to the next file on failure
+
+    # Wait for at least 15 seconds before sending the final message
+    await asyncio.sleep(15)
+
+    # Preparing the final message
+    if len(added_files) <= 10:
+        # If there are 10 or fewer files, list them
+        added_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(added_files)])
+        failed_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(failed_files)])
+        message_text = f"Eklenenler:\n{added_message}\n\nBaşarısız:\n{failed_message}"
+    else:
+        # If there are more than 10 files, summarize by category
+        message_text = f"Eklenenler:\nFilm: {movie_count}\nDizi: {series_count}"
+
+    # Sending the final message with success/failure results
+    await status.edit_text(message_text)
 
         except Exception as e:
             LOGGER.exception(e)
