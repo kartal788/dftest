@@ -72,14 +72,19 @@ async def ekle(client: Client, message: Message):
     reply_message = []  # Çıktı mesajlarını depolayacağımız liste
     added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
 
-    # ----------------- Update mesajı 15 saniyede bir -----------------
-    async def update_status():
-        nonlocal current_status
-        while True:
-            await asyncio.sleep(15)  # 15 saniye bekle
-            # Tarih/saat ekleyerek mesajı güncelleriz
-            current_status = f"📥 Metadata alınıyor... {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+# ----------------- Update mesajı 15 saniyede bir -----------------
+async def update_status():
+    nonlocal current_status
+    last_status = current_status  # Track the last status
+
+    while True:
+        await asyncio.sleep(15)  # 15 saniye bekle
+        new_status = f"📥 Metadata alınıyor... {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        if new_status != last_status:  # Only update if content has changed
+            current_status = new_status
             await status.edit_text(current_status)
+            last_status = new_status  # Update last_status to the new one
 
     # Mesajı güncelleyen asenkron fonksiyonu başlat
     asyncio.create_task(update_status())
