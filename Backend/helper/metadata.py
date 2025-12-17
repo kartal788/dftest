@@ -28,7 +28,6 @@ API_SEMAPHORE = asyncio.Semaphore(12)
 # GENRE NORMALIZATION
 # -------------------------------------------------
 GENRE_TUR_ALIASES = {
-{
   "action": "Aksiyon",
   "film-noir": "Kara Film",
   "game-show": "Oyun Gösterisi",
