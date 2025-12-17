@@ -92,7 +92,7 @@ async def ekle(client: Client, message: Message):
                     if meta:
                         break
                 else:  # Eğer bir dosya ismi verilmişse, isme göre metadata araştıralım
-                    meta = await metadata(title=info, channel=message.chat.id, msg_id=message.id)
+                    meta = await metadata(filename=filename, channel=message.chat.id, msg_id=message.id)
                     if meta:
                         break
 
@@ -223,6 +223,7 @@ async def ekle(client: Client, message: Message):
         message_text = f"Eklenenler:\nFilm: {movie_count}\nDizi: {series_count}"
 
     await status.edit_text(message_text)
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
