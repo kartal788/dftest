@@ -60,7 +60,6 @@ async def filesize(url):
     return "YOK"
 
 # ----------------- /EKLE -----------------
-# ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     args = message.command[1:]  # Kullanıcıdan gelen komut parametrelerini alıyoruz
@@ -68,6 +67,7 @@ async def ekle(client: Client, message: Message):
         return await message.reply_text("Kullanım: /ekle pixeldrain_link [pixeldrain_link_2] ...")
 
     status = await message.reply_text("📥 Metadata alınıyor...")
+    current_status = "📥 Metadata alınıyor..."  # Track the current status message
 
     reply_message = []  # Çıktı mesajlarını depolayacağımız liste
     added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
