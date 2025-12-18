@@ -454,7 +454,7 @@ async def istatistik(client: Client, message: Message):
 async def _cb(client: Client, query: CallbackQuery):
     if query.data=="stop":
         await handle_stop(query)
-        # ------------------- benzerleri sil -----------------
+# ------------------- benzerleri sil -----------------
 @Client.on_message(filters.command("benzerlerisil") & filters.private & filters.user(OWNER_ID))
 async def benzerleri_sil(client: Client, message: Message):
     status = await message.reply_text("🔍 Yinelenen telegram kayıtları taranıyor...")
@@ -472,76 +472,112 @@ async def benzerleri_sil(client: Client, message: Message):
         cursor = col.find({}, {"telegram": 1, "seasons": 1, "title": 1, "tmdb_id": 1, "imdb_id": 1})
 
         for doc in cursor:
-            updated = False
+            doc_updated = False
 
             # ---------- FILM ----------
             if col_name == "movie" and "telegram" in doc:
-                seen = {}
-                new_list = []
+                telegram = doc.get("telegram", [])
+                grouped = {}
 
-                for t in doc["telegram"]:
-                    key = (t.get("quality"), t.get("name"), t.get("size"))
-                    if key not in seen:
-                        seen[key] = True
-                        new_list.append(t)
+                for idx, t in enumerate(telegram):
+                    key = (t.get("name"), t.get("size"))
+                    if key not in grouped:
+                        grouped[key] = []
+                    grouped[key].append((idx, t))
+
+                new_telegram = []
+
+                for (name, size), items in grouped.items():
+                    non_http_items = []
+                    for i, t in items:
+                        tid = str(t.get("id", "")).lower()
+                        if not (tid.startswith("http://") or tid.startswith("https://")):
+                            non_http_items.append((i, t))
+
+                    if non_http_items:
+                        keep_i, keep_t = max(non_http_items, key=lambda x: x[0])
                     else:
-                        total_removed += 1
-                        updated = True
+                        keep_i, keep_t = max(items, key=lambda x: x[0])
 
-                        log_lines.append(
-                            f"[Koleksiyon] movie\n"
-                            f"ID: {doc.get('tmdb_id')}\n"
-                            f"Başlık: {doc.get('title')}\n"
-                            f"Alan: telegram\n"
-                            f"Quality: {t.get('quality')}\n"
-                            f"Name: {t.get('name')}\n"
-                            f"Size: {t.get('size')}\n"
-                            f"{'-'*50}"
-                        )
+                    new_telegram.append(keep_t)
 
-                if updated:
+                    for i, t in items:
+                        if t is not keep_t:
+                            total_removed += 1
+                            doc_updated = True
+                            log_lines.append(
+                                f"[Koleksiyon] movie\n"
+                                f"ID: {doc.get('tmdb_id')}\n"
+                                f"Başlık: {doc.get('title')}\n"
+                                f"Name: {t.get('name')}\n"
+                                f"Size: {t.get('size')}\n"
+                                f"id: {t.get('id')}\n"
+                                f"{'-'*50}"
+                            )
+
+                if doc_updated:
                     col.update_one(
                         {"_id": doc["_id"]},
-                        {"$set": {"telegram": new_list}}
+                        {"$set": {"telegram": new_telegram}}
                     )
                     total_docs += 1
 
-            # ---------- DIZI / BÖLÜM ----------
+            # ---------- DİZİ / BÖLÜM ----------
             if col_name == "tv":
                 seasons = doc.get("seasons", [])
+
                 for season in seasons:
                     season_no = season.get("season_number")
-                    for ep in season.get("episodes", []):
+                    episodes = season.get("episodes", [])
+
+                    for ep in episodes:
                         if "telegram" not in ep:
                             continue
 
-                        seen = {}
-                        new_list = []
+                        telegram = ep.get("telegram", [])
+                        grouped = {}
 
-                        for t in ep["telegram"]:
-                            key = (t.get("quality"), t.get("name"), t.get("size"))
-                            if key not in seen:
-                                seen[key] = True
-                                new_list.append(t)
+                        for idx, t in enumerate(telegram):
+                            key = (t.get("name"), t.get("size"))
+                            if key not in grouped:
+                                grouped[key] = []
+                            grouped[key].append((idx, t))
+
+                        new_telegram = []
+
+                        for (name, size), items in grouped.items():
+                            non_http_items = []
+                            for i, t in items:
+                                tid = str(t.get("id", "")).lower()
+                                if not (tid.startswith("http://") or tid.startswith("https://")):
+                                    non_http_items.append((i, t))
+
+                            if non_http_items:
+                                keep_i, keep_t = max(non_http_items, key=lambda x: x[0])
                             else:
-                                total_removed += 1
-                                updated = True
+                                keep_i, keep_t = max(items, key=lambda x: x[0])
 
-                                log_lines.append(
-                                    f"[Koleksiyon] tv\n"
-                                    f"ID: {doc.get('imdb_id')}\n"
-                                    f"Dizi: {doc.get('title')}\n"
-                                    f"Sezon: {season_no} | Bölüm: {ep.get('episode_number')}\n"
-                                    f"Quality: {t.get('quality')}\n"
-                                    f"Name: {t.get('name')}\n"
-                                    f"Size: {t.get('size')}\n"
-                                    f"{'-'*50}"
-                                )
+                            new_telegram.append(keep_t)
 
-                        if updated:
-                            ep["telegram"] = new_list
+                            for i, t in items:
+                                if t is not keep_t:
+                                    total_removed += 1
+                                    doc_updated = True
+                                    log_lines.append(
+                                        f"[Koleksiyon] tv\n"
+                                        f"ID: {doc.get('imdb_id')}\n"
+                                        f"Dizi: {doc.get('title')}\n"
+                                        f"Sezon: {season_no} | Bölüm: {ep.get('episode_number')}\n"
+                                        f"Name: {t.get('name')}\n"
+                                        f"Size: {t.get('size')}\n"
+                                        f"id: {t.get('id')}\n"
+                                        f"{'-'*50}"
+                                    )
 
-                if updated:
+                        if doc_updated:
+                            ep["telegram"] = new_telegram
+
+                if doc_updated:
                     col.update_one(
                         {"_id": doc["_id"]},
                         {"$set": {"seasons": seasons}}
