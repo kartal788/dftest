@@ -391,8 +391,3 @@ async def fetch_movie_metadata(title, encoded, year, quality, default_id):
         "quality": quality,
         "encoded_string": encoded,
     }
-  def save_tv_metadata(mongo_uri: str, db_name: str, metadata: dict):
-    db = Database(mongo_uri, db_name)
-
-    tv = TVShowSchema(**metadata)
-    db.upsert_tv_show(tv.dict())
