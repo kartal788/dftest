@@ -189,7 +189,6 @@ async def manifest():
         ],
     }
 
-
 # --- Catalog ---
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
 @router.get("/catalog/{media_type}/{id}.json")
@@ -235,15 +234,30 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
         # --- Dizi released sıralaması (en son yayınlanan bölüme göre) ---
         if "released" in id:
             from dateutil.parser import parse as parse_date
+            from datetime import timezone, datetime
+
             def get_latest_episode_release(series):
+                # /yenibolum ile eklenen latest_episode_released alanını kullan
+                released_str = series.get("latest_episode_released")
+                if released_str:
+                    try:
+                        dt = parse_date(released_str)
+                        if not dt.tzinfo:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        return dt
+                    except Exception:
+                        return datetime.min.replace(tzinfo=timezone.utc)
+                # fallback: seasons içinden hesapla
                 latest_date = datetime.min.replace(tzinfo=timezone.utc)
                 for season in series.get("seasons", []):
                     for ep in season.get("episodes", []):
-                        released_str = ep.get("released")
-                        if not released_str:
+                        ep_released = ep.get("released")
+                        if not ep_released:
                             continue
                         try:
-                            ep_date = parse_date(released_str)
+                            ep_date = parse_date(ep_released)
+                            if not ep_date.tzinfo:
+                                ep_date = ep_date.replace(tzinfo=timezone.utc)
                             if ep_date > latest_date:
                                 latest_date = ep_date
                         except Exception:
