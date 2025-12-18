@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from urllib.parse import unquote
+from datetime import datetime, timezone, timedelta
+import PTN
+
+# Backend bileşenleri
 from Backend.config import Telegram
 from Backend import db, __version__
-import PTN
-from datetime import datetime, timezone, timedelta
-
 
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
@@ -14,7 +15,6 @@ ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
-
 
 # --- Genres ---
 GENRES = [
@@ -26,7 +26,6 @@ GENRES = [
     "Savaş ve Politika", "Spor", "Suç", "TV Filmi", "Talk-Show",
     "Tarih", "Vahşi Batı"
 ]
-
 
 # --- Helpers ---
 def convert_to_stremio_meta(item: dict) -> dict:
@@ -40,17 +39,16 @@ def convert_to_stremio_meta(item: dict) -> dict:
         "poster": item.get("poster") or "",
         "logo": item.get("logo") or "",
         "year": item.get("release_year"),
-        "releaseInfo": item.get("release_year"),
+        "releaseInfo": str(item.get("release_year")),
         "imdb_id": item.get("imdb_id", ""),
         "moviedb_id": item.get("tmdb_id", ""),
         "background": item.get("backdrop") or "",
         "genres": item.get("genres") or [],
-        "imdbRating": item.get("rating") or "",
+        "imdbRating": str(item.get("rating") or ""),
         "description": item.get("description") or "",
         "cast": item.get("cast") or [],
         "runtime": item.get("runtime") or "",
     }
-
 
 def format_stream_details(filename: str, quality: str, size: str, file_id: str) -> tuple[str, str]:
     if file_id.startswith("http://") or file_id.startswith("https://"):
@@ -77,10 +75,8 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str) 
         codec_parts.append(f"👤 {parsed['encoder']}")
 
     codec_info = " ".join(codec_parts)
-
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
-
     stream_name = f"{source_prefix} {resolution} {quality_type}".strip()
 
     stream_title = "\n".join(
@@ -90,9 +86,7 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str) 
             codec_info
         ])
     )
-
     return stream_name, stream_title
-
 
 def get_resolution_priority(name: str) -> int:
     mapping = {
@@ -107,12 +101,9 @@ def get_resolution_priority(name: str) -> int:
             return v
     return 1
 
-
-# ✅ SADECE BOYUT İÇİN EKLENDİ
 def parse_size(size_str: str) -> float:
     if not size_str:
         return 0.0
-
     size_str = size_str.lower().replace(" ", "")
     try:
         if "gb" in size_str:
@@ -121,9 +112,49 @@ def parse_size(size_str: str) -> float:
             return float(size_str.replace("mb", ""))
     except ValueError:
         pass
-
     return 0.0
 
+# --- "Yeni Bölüm" (Released) Katalog Sıralama Motoru ---
+async def get_released_series_logic(page: int, page_size: int, genre: Optional[str] = None):
+    """
+    Dizileri bölümlerinin 'released' tarihine göre MongoDB pipeline ile sıralar.
+    Python tarafındaki limitli sıralama sorununu kökten çözer.
+    """
+    skip = (page - 1) * page_size
+    match_query = {"genres": {"$in": [genre]}} if genre else {}
+    
+    pipeline = [
+        {"$match": match_query},
+        {
+            "$addFields": {
+                "max_released": {
+                    "$max": {
+                        "$map": {
+                            "input": "$seasons",
+                            "as": "s",
+                            "in": {"$max": "$$s.episodes.released"}
+                        }
+                    }
+                }
+            }
+        },
+        {"$sort": {"max_released": -1}},
+        {"$skip": skip},
+        {"$limit": page_size}
+    ]
+
+    results = []
+    # Mevcut db yapısına göre tüm storage'ları tarar
+    for i in range(1, db.current_db_index + 1):
+        db_key = f"storage_{i}"
+        cursor = db.dbs[db_key]["tv"].aggregate(pipeline)
+        docs = await cursor.to_list(None)
+        results.extend(docs)
+
+    # Farklı DB'lerden gelen veriyi ortak paydada tekrar sıralar
+    results.sort(key=lambda x: x.get("max_released", "") or "", reverse=True)
+    from Backend.database import convert_objectid_to_str
+    return [convert_objectid_to_str(r) for r in results[:page_size]]
 
 # --- Manifest ---
 @router.get("/manifest.json")
@@ -137,58 +168,15 @@ async def manifest():
         "resources": ["catalog", "meta", "stream"],
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "catalogs": [
-             {
-                "type": "series",
-                "id": "released",
-                "name": "Yeni Bölüm",
-                "extra": [{"name": "skip"}],
-                "extraSupported": ["skip"]
-            },
-            {
-                "type": "movie",
-                "id": "latest_movies",
-                "name": "Yeni Eklenen",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "top_movies",
-                "name": "Popüler",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "latest_series",
-                "name": "Yeni Eklenen",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "top_series",
-                "name": "Popüler",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "movies_2025",
-                "name": "2025 Filmleri",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
- {
-    "type": "movie",
-    "id": "movies_2024",
-    "name": "2024 Filmleri",
-    "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-    "extraSupported": ["genre", "skip"]
-}
+            {"type": "series", "id": "released", "name": "Yeni Bölüm", "extra": [{"name": "skip"}], "extraSupported": ["skip"]},
+            {"type": "movie", "id": "latest_movies", "name": "Yeni Eklenen", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]},
+            {"type": "movie", "id": "top_movies", "name": "Popüler", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]},
+            {"type": "series", "id": "latest_series", "name": "Yeni Eklenen", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]},
+            {"type": "series", "id": "top_series", "name": "Popüler", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]},
+            {"type": "movie", "id": "movies_2025", "name": "2025 Filmleri", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]},
+            {"type": "movie", "id": "movies_2024", "name": "2024 Filmleri", "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}], "extraSupported": ["genre", "skip"]}
         ],
     }
-
 
 # --- Catalog ---
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
@@ -221,9 +209,11 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
         else:
             sort = [("updated_on", "desc")]
             items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
-
     else:  # series
-        if "top" in id:
+        if id == "released":
+            # DÜZELTİLEN KISIM: Özel sıralama mantığı çağrılıyor
+            items = await get_released_series_logic(page, PAGE_SIZE, genre)
+        elif "top" in id:
             sort = [("rating", "desc")]
             data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
             items = data.get("tv_shows", [])
@@ -231,26 +221,6 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             sort = [("updated_on", "desc")]
             data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
             items = data.get("tv_shows", [])
-
-        # --- Dizi released sıralaması (en son yayınlanan bölüme göre) ---
-        if "released" in id:
-            from dateutil.parser import parse as parse_date
-            def get_latest_episode_release(series):
-                latest_date = datetime.min.replace(tzinfo=timezone.utc)
-                for season in series.get("seasons", []):
-                    for ep in season.get("episodes", []):
-                        released_str = ep.get("released")
-                        if not released_str:
-                            continue
-                        try:
-                            ep_date = parse_date(released_str)
-                            if ep_date > latest_date:
-                                latest_date = ep_date
-                        except Exception:
-                            continue
-                return latest_date
-
-            items.sort(key=get_latest_episode_release, reverse=True)
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
@@ -282,9 +252,7 @@ async def meta(media_type: str, id: str):
                 })
 
         meta_obj["videos"] = videos
-
     return {"meta": meta_obj}
-
 
 # --- Streams ---
 @router.get("/stream/{media_type}/{id}.json")
@@ -299,8 +267,7 @@ async def streams(media_type: str, id: str):
     if not media or "telegram" not in media:
         return {"streams": []}
 
-    streams = []
-
+    streams_out = []
     for q in media["telegram"]:
         file_id = q["id"]
         filename = q.get("name", "")
@@ -315,15 +282,15 @@ async def streams(media_type: str, id: str):
             else f"{BASE_URL}/dl/{file_id}/video.mkv"
         )
 
-        streams.append({
+        streams_out.append({
             "name": name,
             "title": title,
             "url": url,
-            "_size": parse_size(size)   # ← sadece sıralama için
+            "_size": parse_size(size)
         })
 
-    # ✅ AYNI ÇÖZÜNÜRLÜKTE BOYUTU BÜYÜK OLAN ÜSTE
-    streams.sort(
+    # Sıralama: Çözünürlük ve Boyut
+    streams_out.sort(
         key=lambda s: (
             get_resolution_priority(s["name"]),
             s["_size"]
@@ -331,7 +298,7 @@ async def streams(media_type: str, id: str):
         reverse=True
     )
 
-    for s in streams:
+    for s in streams_out:
         s.pop("_size", None)
 
-    return {"streams": streams}
+    return {"streams": streams_out}
