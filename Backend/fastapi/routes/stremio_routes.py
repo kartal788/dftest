@@ -141,7 +141,7 @@ async def manifest():
                 "type": "series",
                 "id": "released",
                 "name": "Yeni Bölüm",
-                "extra": [{"name": "skip"}],  # İstersen genre da ekleyebilirsin
+                "extra": [{"name": "skip"}],
                 "extraSupported": ["skip"]
             },
             {
@@ -171,6 +171,13 @@ async def manifest():
                 "name": "Popüler",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
+            },
+            {
+                "type": "movie",
+                "id": "movies_2025",
+                "name": "2025 Filmleri",
+                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
+                "extraSupported": ["genre", "skip"]
             }
         ],
     }
@@ -193,22 +200,26 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     page = (stremio_skip // PAGE_SIZE) + 1
 
     if media_type == "movie":
-        if "top" in id:
+        if id == "movies_2025":
+            sort = [("updated_on", "desc")]
+            all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
+            items = [m for m in all_movies.get("movies", []) if m.get("release_year") == 2025]
+        elif "top" in id:
             sort = [("rating", "desc")]
+            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
         else:
             sort = [("updated_on", "desc")]
-
-        data = await db.sort_movies(sort, page, PAGE_SIZE, genre)
-        items = data.get("movies", [])
+            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
 
     else:  # series
         if "top" in id:
             sort = [("rating", "desc")]
+            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+            items = data.get("tv_shows", [])
         else:
             sort = [("updated_on", "desc")]
-
-        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-        items = data.get("tv_shows", [])
+            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+            items = data.get("tv_shows", [])
 
         # --- Dizi released sıralaması ---
         if "released" in id:
