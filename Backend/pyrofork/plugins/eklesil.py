@@ -1,7 +1,8 @@
 import os
 import re
 import aiohttp
-from datetime import datetime
+from datetime import timezone, datetime
+from dateutil.parser import parse as parse_date
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -260,8 +261,10 @@ async def yenibolum(client: Client, message: Message):
                 if not released:
                     continue
                 try:
+                    from dateutil.parser import parse as parse_date
                     dt = parse_date(released)
                     if not dt.tzinfo:
+                        from datetime import timezone
                         dt = dt.replace(tzinfo=timezone.utc)
                     if not latest or dt > latest:
                         latest = dt
@@ -276,21 +279,15 @@ async def yenibolum(client: Client, message: Message):
 
         await series_col.update_one(
             {"_id": tv["_id"]},
-            {
-                "$set": {
-                    "latest_episode_released": latest_iso,
-                    "updated_on": str(datetime.utcnow())
-                }
-            }
+            {"$set": {"latest_episode_released": latest_iso, "updated_on": str(datetime.utcnow())}}
         )
 
         updated += 1
 
     await status.edit_text(
-        "✅ Güncelleme tamamlandı\n\n"
-        f"📺 Güncellenen dizi: {updated}\n"
-        f"⏭ Atlanan (tarihsiz): {skipped}"
+        f"✅ Güncelleme tamamlandı\n\n📺 Güncellenen dizi: {updated}\n⏭ Atlanan (tarihsiz): {skipped}"
     )
+
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
 
