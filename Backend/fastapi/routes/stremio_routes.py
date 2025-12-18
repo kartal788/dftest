@@ -94,12 +94,12 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str) 
     return stream_name, stream_title
 
 
-def get_resolution_priority(name: str) -> int:
-    mapping = {
-        "2160p": 2160, "4k": 2160,
-        "1080p": 1080,
-        "720p": 720,
-        "480p": 480,
+def get_resolution_priority(stream_name: str) -> int:
+    resolution_map = {
+        "2160p": 2160, "4k": 2160, "uhd": 2160,
+        "1080p": 1080, "fhd": 1080,
+        "720p": 720, "hd": 720,
+        "480p": 480, "sd": 480,
         "360p": 360,
     }
     for k, v in mapping.items():
@@ -125,139 +125,178 @@ def parse_size(size_str: str) -> float:
 
 
 # --- Manifest ---
+# --- Routes ---
 @router.get("/manifest.json")
-async def manifest():
+async def get_manifest():
     return {
         "id": "telegram.media",
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
-        "description": "Dizi ve film arşivim.",
+        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
+        "description": "Streams movies and series from your Telegram.",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
-        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "catalogs": [
             {
                 "type": "movie",
                 "id": "latest_movies",
-                "name": "Yeni Eklenen",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
+                "name": "Latest",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"}
+                ],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "movie",
                 "id": "top_movies",
-                "name": "Popüler",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
+                "name": "Popular",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"},
+                    {"name": "search", "isRequired": False}
+                ],
+                "extraSupported": ["genre", "skip", "search"]
             },
             {
                 "type": "series",
                 "id": "latest_series",
-                "name": "Yeni Eklenen",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
+                "name": "Latest",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"}
+                ],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "series",
                 "id": "top_series",
-                "name": "Popüler",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "movies_2025",
-                "name": "2025",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "movies_2024",
-                "name": "2024",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
+                "name": "Popular",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"},
+                    {"name": "search", "isRequired": False}
+                ],
+                "extraSupported": ["genre", "skip", "search"]
             }
         ],
+        "idPrefixes": [""],
+        "behaviorHints": {
+            "configurable": False,
+            "configurationRequired": False
+        }
     }
 
 
 # --- Catalog ---
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
 @router.get("/catalog/{media_type}/{id}.json")
-async def catalog(media_type: str, id: str, extra: Optional[str] = None):
+async def get_catalog(media_type: str, id: str, extra: Optional[str] = None):
+    if media_type not in ["movie", "series"]:
+        raise HTTPException(status_code=404, detail="Invalid catalog type")
+
+    genre_filter = None
+    search_query = None
     stremio_skip = 0
-    genre = None
 
     if extra:
-        for p in extra.replace("&", "/").split("/"):
-            if p.startswith("genre="):
-                genre = unquote(p[6:])
-            elif p.startswith("skip="):
-                stremio_skip = int(p[5:] or 0)
+        params = extra.replace("&", "/").split("/")
+        for param in params:
+            if param.startswith("genre="):
+                genre_filter = unquote(param.removeprefix("genre="))
+            elif param.startswith("search="):
+                search_query = unquote(param.removeprefix("search="))
+            elif param.startswith("skip="):
+                try:
+                    stremio_skip = int(param.removeprefix("skip="))
+                except ValueError:
+                    stremio_skip = 0
 
     page = (stremio_skip // PAGE_SIZE) + 1
-    items = []
 
-    if media_type == "movie":
-        if id == "movies_2025":
-            year = 2025
-            sort = [("rating", "desc"), ("release_year", "desc")]
-            all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
-            items = [m for m in all_movies.get("movies", []) if m.get("release_year") == year]
-        elif id == "movies_2024":
-            year = 2024
-            sort = [("rating", "desc"), ("release_year", "desc")]
-            all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
-            items = [m for m in all_movies.get("movies", []) if m.get("release_year") == year]
-        elif "top" in id:
-            sort = [("rating", "desc")]
-            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
+    try:
+        if search_query:
+            search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
+            all_items = search_results.get("results", [])
+            db_media_type = "tv" if media_type == "series" else "movie"
+            items = [item for item in all_items if item.get("media_type") == db_media_type]
         else:
-            sort = [("updated_on", "desc")]
-            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
+            if "latest" in id:
+                sort_params = [("updated_on", "desc")]
+            elif "top" in id:
+                sort_params = [("rating", "desc")]
+            else:
+                sort_params = [("updated_on", "desc")]
 
-    elif media_type == "series":
-        if "top" in id:
-            sort = [("rating", "desc")]
-        else:
-            sort = [("updated_on", "desc")]
-        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-        items = data.get("tv_shows", [])
+            if media_type == "movie":
+                data = await db.sort_movies(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                items = data.get("movies", [])
+            else:
+                data = await db.sort_tv_shows(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                items = data.get("tv_shows", [])
+    except Exception as e:
+        return {"metas": []}
 
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
-
+    metas = [convert_to_stremio_meta(item) for item in items]
+    return {"metas": metas}
 
 
 # --- Meta ---
 @router.get("/meta/{media_type}/{id}.json")
-async def meta(media_type: str, id: str):
-    tmdb_id, db_index = map(int, id.split("-"))
-    media = await db.get_media_details(tmdb_id, db_index)
+async def get_meta(media_type: str, id: str):
+    try:
+        tmdb_id_str, db_index_str = id.split("-")
+        tmdb_id, db_index = int(tmdb_id_str), int(db_index_str)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid Stremio ID format")
 
+    media = await db.get_media_details(tmdb_id=tmdb_id, db_index=db_index)
     if not media:
         return {"meta": {}}
 
-    meta_obj = convert_to_stremio_meta(media)
+    meta_obj = {
+        "id": id,
+        "type": "series" if media.get("media_type") == "tv" else "movie",
+        "name": media.get("title", ""),
+        "description": media.get("description", ""),
+        "year": str(media.get("release_year", "")),
+        "imdbRating": str(media.get("rating", "")),
+        "genres": media.get("genres", []),
+        "poster": media.get("poster", ""),
+        "logo": media.get("logo", ""),
+        "background": media.get("backdrop", ""),
+        "imdb_id": media.get("imdb_id", ""),
+        "releaseInfo": media.get("release_year"),
+        "moviedb_id": media.get("tmdb_id", ""),
+        "cast": media.get("cast") or [],
+        "runtime": media.get("runtime") or "",
 
-    if media_type == "series":
+    }
+
+    # --- Add Episodes ---
+    if media_type == "series" and "seasons" in media:
+
         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
         videos = []
 
-        for s in media.get("seasons", []):
-            for e in s.get("episodes", []):
+        for season in sorted(media.get("seasons", []), key=lambda s: s.get("season_number")):
+            for episode in sorted(season.get("episodes", []), key=lambda e: e.get("episode_number")):
+
+                episode_id = f"{id}:{season['season_number']}:{episode['episode_number']}"
+
                 videos.append({
-                    "id": f"{id}:{s['season_number']}:{e['episode_number']}",
-                    "title": e.get("title"),
-                    "season": s["season_number"],
-                    "episode": e["episode_number"],
-                    "thumbnail": e.get("episode_backdrop") or "https://raw.githubusercontent.com/weebzone/Colab-Tools/refs/heads/main/no_episode_backdrop.png",
-                    "released": e.get("released") or yesterday,
-                    "overview": e.get("overview"),
+                    "id": episode_id,
+                    "title": episode.get("title", f"Episode {episode['episode_number']}"),
+                    "season": season.get("season_number"),
+                    "episode": episode.get("episode_number"),
+                    "overview": episode.get("overview") or "No description available for this episode yet.",
+                    "released": episode.get("released") or yesterday,
+                    "thumbnail": episode.get("episode_backdrop") or "https://raw.githubusercontent.com/weebzone/Colab-Tools/refs/heads/main/no_episode_backdrop.png",
+                    "imdb_id": episode.get("imdb_id") or media.get("imdb_id"),
                 })
 
         meta_obj["videos"] = videos
-
     return {"meta": meta_obj}
 
 
