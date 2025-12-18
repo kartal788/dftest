@@ -51,7 +51,6 @@ class TVShowSchema(BaseModel):
     runtime: Optional[str] = None
     media_type: str
     updated_on: datetime = Field(default_factory=datetime.utcnow)
-    latest_episode_released: Optional[str] = None
     seasons: List[Season] = Field(default_factory=list)
 
 
