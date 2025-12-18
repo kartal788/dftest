@@ -242,52 +242,6 @@ async def ekle(client: Client, message: Message):
 
     await status.edit_text(result_text)
     
-# ----------------- /yenibolum -----------------
-@Client.on_message(filters.command("yenibolum") & filters.private & CustomFilters.owner)
-async def yenibolum(client: Client, message: Message):
-    status = await message.reply_text("🔄 Yeni bölüm tarihleri güncelleniyor...")
-
-    updated = 0
-    skipped = 0
-
-    cursor = series_col.find({})
-
-    async for tv in cursor:
-        latest = None
-
-        for season in tv.get("seasons", []):
-            for ep in season.get("episodes", []):
-                released = ep.get("released")
-                if not released:
-                    continue
-                try:
-                    from dateutil.parser import parse as parse_date
-                    dt = parse_date(released)
-                    if not dt.tzinfo:
-                        from datetime import timezone
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    if not latest or dt > latest:
-                        latest = dt
-                except Exception:
-                    continue
-
-        if not latest:
-            skipped += 1
-            continue
-
-        latest_iso = latest.isoformat().replace("+00:00", "Z")
-
-        await series_col.update_one(
-            {"_id": tv["_id"]},
-            {"$set": {"latest_episode_released": latest_iso, "updated_on": str(datetime.utcnow())}}
-        )
-
-        updated += 1
-
-    await status.edit_text(
-        f"✅ Güncelleme tamamlandı\n\n📺 Güncellenen dizi: {updated}\n⏭ Atlanan (tarihsiz): {skipped}"
-    )
-
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
 
