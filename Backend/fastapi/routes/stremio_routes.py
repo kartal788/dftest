@@ -108,7 +108,6 @@ def get_resolution_priority(name: str) -> int:
     return 1
 
 
-# ✅ SADECE BOYUT İÇİN EKLENDİ
 def parse_size(size_str: str) -> float:
     if not size_str:
         return 0.0
@@ -137,13 +136,6 @@ async def manifest():
         "resources": ["catalog", "meta", "stream"],
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "catalogs": [
-             {
-                "type": "series",
-                "id": "released",
-                "name": "Yeni Bölüm",
-                "extra": [{"name": "skip"}],
-                "extraSupported": ["skip"]
-            },
             {
                 "type": "movie",
                 "id": "latest_movies",
@@ -179,13 +171,13 @@ async def manifest():
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             },
- {
-    "type": "movie",
-    "id": "movies_2024",
-    "name": "2024 Filmleri",
-    "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-    "extraSupported": ["genre", "skip"]
-}
+            {
+                "type": "movie",
+                "id": "movies_2024",
+                "name": "2024 Filmleri",
+                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
+                "extraSupported": ["genre", "skip"]
+            }
         ],
     }
 
@@ -232,27 +224,8 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
             items = data.get("tv_shows", [])
 
-        # --- Dizi released sıralaması (en son yayınlanan bölüme göre) ---
-        if "released" in id:
-            from dateutil.parser import parse as parse_date
-            def get_latest_episode_release(series):
-                latest_date = datetime.min.replace(tzinfo=timezone.utc)
-                for season in series.get("seasons", []):
-                    for ep in season.get("episodes", []):
-                        released_str = ep.get("released")
-                        if not released_str:
-                            continue
-                        try:
-                            ep_date = parse_date(released_str)
-                            if ep_date > latest_date:
-                                latest_date = ep_date
-                        except Exception:
-                            continue
-                return latest_date
-
-            items.sort(key=get_latest_episode_release, reverse=True)
-
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
+
 
 # --- Meta ---
 @router.get("/meta/{media_type}/{id}.json")
@@ -319,10 +292,9 @@ async def streams(media_type: str, id: str):
             "name": name,
             "title": title,
             "url": url,
-            "_size": parse_size(size)   # ← sadece sıralama için
+            "_size": parse_size(size)
         })
 
-    # ✅ AYNI ÇÖZÜNÜRLÜKTE BOYUTU BÜYÜK OLAN ÜSTE
     streams.sort(
         key=lambda s: (
             get_resolution_priority(s["name"]),
