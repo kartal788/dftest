@@ -398,49 +398,87 @@ async def tur_ve_platform_duzelt(client: Client, message: Message):
     await start_msg.edit_text(f"✅ Tür ve platform güncellemesi tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
 
 # ---------------- /ISTATISTIK ----------------
-def get_db_stats_and_genres(url):
-    client = MongoClient(url)
-    db = client[client.list_database_names()[0]]
+def count_movie_links_qualities():
+    link_set = set()
+    telegram_set = set()
+    quality_count = defaultdict(lambda: {"Link": 0, "Telegram": 0})
 
-    total_movies = db["movie"].count_documents({})
-    total_series = db["tv"].count_documents({})
+    for doc in movie_col.find({}, {"telegram": 1}):
+        for t in doc.get("telegram", []):
+            _id = t.get("id", "")
+            q = t.get("quality", "Unknown")
+            if _id.startswith("http://") or _id.startswith("https://"):
+                if _id not in link_set:
+                    link_set.add(_id)
+                    quality_count[q]["Link"] += 1
+            else:
+                if _id not in telegram_set:
+                    telegram_set.add(_id)
+                    quality_count[q]["Telegram"] += 1
+    return len(link_set), len(telegram_set), dict(quality_count)
 
-    stats = db.command("dbstats")
-    storage_mb = round(stats.get("storageSize",0)/(1024*1024),2)
-    storage_percent = round((storage_mb/512)*100,1)
+def count_series_links_qualities():
+    link_set = set()
+    telegram_set = set()
+    quality_count = defaultdict(lambda: {"Link": 0, "Telegram": 0})
 
-    genre_stats=defaultdict(lambda:{"film":0,"dizi":0})
-    for d in db["movie"].aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
-        genre_stats[d["_id"]]["film"]=d["count"]
-    for d in db["tv"].aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
-        genre_stats[d["_id"]]["dizi"]=d["count"]
-    return total_movies,total_series,storage_mb,storage_percent,genre_stats
+    for doc in series_col.find({}, {"seasons.episodes.telegram": 1}):
+        for season in doc.get("seasons", []):
+            for ep in season.get("episodes", []):
+                for t in ep.get("telegram", []):
+                    _id = t.get("id", "")
+                    q = t.get("quality", "Unknown")
+                    if _id.startswith("http://") or _id.startswith("https://"):
+                        if _id not in link_set:
+                            link_set.add(_id)
+                            quality_count[q]["Link"] += 1
+                    else:
+                        if _id not in telegram_set:
+                            telegram_set.add(_id)
+                            quality_count[q]["Telegram"] += 1
+    return len(link_set), len(telegram_set), dict(quality_count)
 
-def get_system_status():
-    cpu = round(psutil.cpu_percent(interval=1),1)
-    ram = round(psutil.virtual_memory().percent,1)
-    disk = psutil.disk_usage(DOWNLOAD_DIR)
-    free_disk = round(disk.free/(1024**3),2)
-    free_percent = round((disk.free/disk.total)*100,1)
-    
-    uptime_sec = int(time.time() - bot_start_time)
-    h, rem = divmod(uptime_sec, 3600)
-    m, s = divmod(rem, 60)
-    uptime = f"{h}sa {m}dk {s}sn"
-
-    return cpu, ram, free_disk, free_percent, uptime
+def format_quality_stats(q_dict):
+    return "\n".join(
+        f"   ┠ {q} → Link: {c['Link']} | Telegram: {c['Telegram']}"
+        for q, c in sorted(q_dict.items())
+    )
 
 @Client.on_message(filters.command("istatistik") & filters.private & filters.user(OWNER_ID))
 async def istatistik(client: Client, message: Message):
-    total_movies,total_series,storage_mb,storage_percent,genre_stats=get_db_stats_and_genres(MONGO_URL)
-    cpu,ram,free_disk,free_percent,uptime=get_system_status()
+    total_movies = movie_col.count_documents({})
+    total_series = series_col.count_documents({})
 
-    genre_text="\n".join(f"{g:<14} | Film: {c['film']:<4} | Dizi: {c['dizi']:<4}" for g,c in sorted(genre_stats.items()))
+    # Link ve kalite bazlı istatistikler
+    movie_link, movie_tg, movie_quality_counts = count_movie_links_qualities()
+    series_link, series_tg, series_quality_counts = count_series_links_qualities()
 
-    text=(
+    # Depolama ve sistem durumu
+    stats = db.command("dbstats")
+    storage_mb = round(stats.get("storageSize",0)/(1024*1024),2)
+    storage_percent = round((storage_mb/512)*100,1)
+    cpu, ram, free_disk, free_percent, uptime = get_system_status()
+
+    # Tür dağılımı
+    genre_stats = defaultdict(lambda: {"film":0, "dizi":0})
+    for d in movie_col.aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
+        genre_stats[d["_id"]]["film"] = d["count"]
+    for d in series_col.aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
+        genre_stats[d["_id"]]["dizi"] = d["count"]
+    genre_text = "\n".join(f"{g:<14} | Film: {c['film']:<4} | Dizi: {c['dizi']:<4}" 
+                           for g, c in sorted(genre_stats.items()))
+
+    # Mesaj metni
+    text = (
         f"⌬ <b>İstatistik</b>\n\n"
         f"┠ Filmler : {total_movies}\n"
+        f"┃  ┠ Link     : {movie_link}\n"
+        f"┃  ┖ Telegram : {movie_tg}\n"
+        f"{format_quality_stats(movie_quality_counts)}\n\n"
         f"┠ Diziler : {total_series}\n"
+        f"┃  ┠ Link     : {series_link}\n"
+        f"┃  ┖ Telegram : {series_tg}\n"
+        f"{format_quality_stats(series_quality_counts)}\n\n"
         f"┖ Depolama: {storage_mb} MB (%{storage_percent})\n\n"
         f"<b>Tür Dağılımı</b>\n<pre>{genre_text}</pre>\n\n"
         f"┟ CPU → {cpu}% | Boş → {free_disk}GB [{free_percent}%]\n"
