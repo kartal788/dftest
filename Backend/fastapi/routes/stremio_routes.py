@@ -212,23 +212,21 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
         # --- Dizi released sıralaması ---
         if "released" in id:
-            def get_series_latest_release(series):
-                latest_date = None
+            def get_latest_episode_release(series):
+                latest_date = datetime.min.replace(tzinfo=timezone.utc)
                 for season in series.get("seasons", []):
                     for ep in season.get("episodes", []):
                         try:
                             ep_date = datetime.fromisoformat(ep["released"].replace("Z", "+00:00"))
-                            if not latest_date or ep_date > latest_date:
+                            if ep_date > latest_date:
                                 latest_date = ep_date
                         except Exception:
                             continue
-                return latest_date or datetime.min
+                return latest_date
 
-            items.sort(key=get_series_latest_release, reverse=True)
+            items.sort(key=get_latest_episode_release, reverse=True)
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
-
-
 
 # --- Meta ---
 @router.get("/meta/{media_type}/{id}.json")
