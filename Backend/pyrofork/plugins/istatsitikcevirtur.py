@@ -327,9 +327,10 @@ async def cevirkaldir(client: Client, message: Message):
 
 
 # ---------------- /TUR ----------------
+# ---------------- /TUR ----------------
 @Client.on_message(filters.command("tur") & filters.private & filters.user(OWNER_ID))
-async def tur_ve_platform_duzelt(client: Client, message: Message):
-    start_msg = await message.reply_text("🔄 Tür ve platform güncellemesi başlatıldı…")
+async def tur_komutu(client: Client, message: Message):
+    start_msg = await message.reply_text("🔄 Tür güncellemesi başlatıldı…")
 
     genre_map = {
         "Action": "Aksiyon", "Film-Noir": "Kara Film", "Game-Show": "Oyun Gösterisi", "Short": "Kısa",
@@ -346,6 +347,31 @@ async def tur_ve_platform_duzelt(client: Client, message: Message):
         "Bilim Kurgu & Fantazi": "Bilim Kurgu ve Fantazi", "Talk": "Talk-Show"
     }
 
+    collections = [(movie_col, "Filmler"), (series_col, "Diziler")]
+    total_fixed = 0
+
+    for col, name in collections:
+        docs_cursor = col.find({}, {"_id": 1, "genres": 1})
+        bulk_ops = []
+
+        for doc in docs_cursor:
+            doc_id = doc["_id"]
+            genres = doc.get("genres", [])
+            new_genres = [genre_map.get(g, g) for g in genres]
+            if new_genres != genres:
+                bulk_ops.append(UpdateOne({"_id": doc_id}, {"$set": {"genres": new_genres}}))
+                total_fixed += 1
+
+        if bulk_ops:
+            col.bulk_write(bulk_ops)
+
+    await start_msg.edit_text(f"✅ Tür güncellemesi tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
+
+# ---------------- /PLATFORMEKLE ----------------
+@Client.on_message(filters.command("platformekle") & filters.private & filters.user(OWNER_ID))
+async def platform_ekle(client: Client, message: Message):
+    start_msg = await message.reply_text("🔄 Platform ekleme başlatıldı…")
+
     platform_map = {
         "MAX": "Max", "Hbomax": "Max", "TABİİ": "Tabii", "NF": "Netflix", "DSNP": "Disney",
         "Tod": "Tod", "Blutv": "Max", "Tv+": "Tv+", "Exxen": "Exxen",
@@ -356,26 +382,20 @@ async def tur_ve_platform_duzelt(client: Client, message: Message):
     total_fixed = 0
 
     for col, name in collections:
-        docs_cursor = col.find({}, {"_id": 1, "genres": 1, "telegram": 1, "seasons": 1})
+        docs_cursor = col.find({}, {"_id": 1, "telegram": 1, "seasons": 1})
         bulk_ops = []
 
         for doc in docs_cursor:
             doc_id = doc["_id"]
-            genres = doc.get("genres", [])
+            platforms = doc.get("platform", [])
             updated = False
-
-            # Türleri güncelle
-            new_genres = [genre_map.get(g, g) for g in genres]
-            if new_genres != genres:
-                updated = True
-            genres = new_genres
 
             # Telegram alanı üzerinden platform ekle
             for t in doc.get("telegram", []):
                 name_field = t.get("name", "").lower()
                 for key, val in platform_map.items():
-                    if key.lower() in name_field and val not in genres:
-                        genres.append(val)
+                    if key.lower() in name_field and val not in platforms:
+                        platforms.append(val)
                         updated = True
 
             # Sezonlardaki telegram kontrolleri
@@ -384,18 +404,41 @@ async def tur_ve_platform_duzelt(client: Client, message: Message):
                     for t in ep.get("telegram", []):
                         name_field = t.get("name", "").lower()
                         for key, val in platform_map.items():
-                            if key.lower() in name_field and val not in genres:
-                                genres.append(val)
+                            if key.lower() in name_field and val not in platforms:
+                                platforms.append(val)
                                 updated = True
 
             if updated:
-                bulk_ops.append(UpdateOne({"_id": doc_id}, {"$set": {"genres": genres}}))
+                bulk_ops.append(UpdateOne({"_id": doc_id}, {"$set": {"platform": platforms}}))
                 total_fixed += 1
 
         if bulk_ops:
             col.bulk_write(bulk_ops)
 
-    await start_msg.edit_text(f"✅ Tür ve platform güncellemesi tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
+    await start_msg.edit_text(f"✅ Platform ekleme tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
+
+
+# ---------------- /PLATFORMSIL ----------------
+@Client.on_message(filters.command("platformsil") & filters.private & filters.user(OWNER_ID))
+async def platform_sil(client: Client, message: Message):
+    start_msg = await message.reply_text("🔄 Platform kayıtları siliniyor…")
+    total_fixed = 0
+
+    collections = [movie_col, series_col]
+
+    for col in collections:
+        docs_cursor = col.find({"platform": {"$exists": True}}, {"_id": 1})
+        bulk_ops = []
+
+        for doc in docs_cursor:
+            doc_id = doc["_id"]
+            bulk_ops.append(UpdateOne({"_id": doc_id}, {"$unset": {"platform": ""}}))
+            total_fixed += 1
+
+        if bulk_ops:
+            col.bulk_write(bulk_ops)
+
+    await start_msg.edit_text(f"✅ Platform kayıtları silindi.\nToplam değiştirilen kayıt: {total_fixed}")
 
 # ---------------- /ISTATISTIK ----------------
 def get_system_status():
