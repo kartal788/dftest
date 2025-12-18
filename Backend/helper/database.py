@@ -1,8 +1,7 @@
 from asyncio import create_task
 from bson import ObjectId
 import motor.motor_asyncio
-from datetime import timezone, datetime
-from dateutil.parser import parse as parse_date
+from datetime import datetime
 from pydantic import ValidationError
 from pymongo import ASCENDING, DESCENDING
 from typing import Dict, List, Optional, Tuple, Any
@@ -27,28 +26,6 @@ def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class Database:
-        def _calculate_latest_episode_released(self, tv_doc: dict) -> str | None:
-        latest = None
-
-        for season in tv_doc.get("seasons", []):
-            for ep in season.get("episodes", []):
-                released = ep.get("released")
-                if not released:
-                    continue
-                try:
-                    dt = parse_date(released)
-                    if not latest or dt > latest:
-                        latest = dt
-                except Exception:
-                    continue
-
-        if not latest:
-            return None
-
-        if not latest.tzinfo:
-            latest = latest.replace(tzinfo=timezone.utc)
-
-        return latest.isoformat().replace("+00:00", "Z")
     def __init__(self, db_name: str = "dbFyvio"):
         self.db_uris = Telegram.DATABASE
         self.db_name = db_name
@@ -908,23 +885,7 @@ class Database:
         result = await self.dbs[db_key]["tv"].replace_one({"tmdb_id": tmdb_id}, tv)
         return result.modified_count > 0
 
-    def upsert_tv_show(self, tv_data: dict):
-        existing = self.tv.find_one({
-            "tmdb_id": tv_data["tmdb_id"],
-            "db_index": tv_data["db_index"]
-        })
 
-        if not existing:
-            tv_data["latest_episode_released"] = self._calculate_latest_episode_released(tv_data)
-            tv_data["updated_on"] = datetime.utcnow()
-            self.tv.insert_one(tv_data)
-            return
-
-        existing["seasons"] = tv_data.get("seasons", existing.get("seasons", []))
-        existing["latest_episode_released"] = self._calculate_latest_episode_released(existing)
-        existing["updated_on"] = datetime.utcnow()
-
-        self.tv.replace_one({"_id": existing["_id"]}, existing)
     # Get per-DB statistics (movies, tv shows, used size, etc.)
     async def get_database_stats(self):
         stats = []
