@@ -167,14 +167,14 @@ async def manifest():
             {
                 "type": "movie",
                 "id": "movies_2025",
-                "name": "2025 Filmleri",
+                "name": "2025",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "movie",
                 "id": "movies_2024",
-                "name": "2024 Filmleri",
+                "name": "2024",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             }
