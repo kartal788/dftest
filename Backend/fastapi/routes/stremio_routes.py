@@ -136,7 +136,7 @@ async def get_manifest():
             {
                 "type": "movie",
                 "id": "latest_movies",
-                "name": "Latest",
+                "name": "Yeni eklenenler",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"}
@@ -146,7 +146,7 @@ async def get_manifest():
             {
                 "type": "movie",
                 "id": "top_movies",
-                "name": "Popular",
+                "name": "Popüler",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
@@ -157,7 +157,7 @@ async def get_manifest():
             {
                 "type": "series",
                 "id": "latest_series",
-                "name": "Latest",
+                "name": "Yeni eklenenler",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"}
@@ -167,7 +167,7 @@ async def get_manifest():
             {
                 "type": "series",
                 "id": "top_series",
-                "name": "Popular",
+                "name": "Popüler",
                 "extra": [
                     {"name": "genre", "isRequired": False, "options": GENRES},
                     {"name": "skip"},
