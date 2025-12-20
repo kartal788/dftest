@@ -213,7 +213,7 @@ async def cevir(client: Client, message: Message):
                     try:
                         await start_msg.edit_text(
                             (
-                                f"🇹🇷 Türkçe çeviri hazırlanıyor...\n\n"
+                                f"🇹🇷 Türkçe çeviri yapılıyor.\n\n"
                                 f"Toplam: {total_to_translate} (Film {movies_to_translate} | Bölüm {episodes_to_translate})\n"
                                 f"Çevrilen: Film {translated_movies} | Bölüm {translated_episodes}\n"
                                 f"Kalan: Film {movies_to_translate - translated_movies} | Bölüm {episodes_to_translate - translated_episodes}\n"
@@ -325,8 +325,6 @@ async def cevirkaldir(client: Client, message: Message):
 
     await status.edit_text(f"✅ 'cevrildi' alanları kaldırıldı.\nToplam güncellenen kayıt: {total_updated}")
 
-
-# ---------------- /TUR ----------------
 # ---------------- /TUR ----------------
 @Client.on_message(filters.command("tur") & filters.private & filters.user(OWNER_ID))
 async def tur_komutu(client: Client, message: Message):
@@ -416,7 +414,6 @@ async def platform_ekle(client: Client, message: Message):
             col.bulk_write(bulk_ops)
 
     await start_msg.edit_text(f"✅ Platform ekleme tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
-
 
 # ---------------- /PLATFORMSIL ----------------
 @Client.on_message(filters.command("platformsil") & filters.private & filters.user(OWNER_ID))
