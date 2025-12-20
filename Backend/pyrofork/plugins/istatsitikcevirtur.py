@@ -553,9 +553,9 @@ async def _cb(client: Client, query: CallbackQuery):
     if query.data=="stop":
         await handle_stop(query)
 # ---------- benzerleri sil ----------
-@Client.on_message(filters.command("benzerlerisil") & filters.private & filters.user(OWNER_ID))
+@Client.on_message(filters.command("aynivideolarisil") & filters.private & filters.user(OWNER_ID))
 async def benzerleri_sil(client: Client, message: Message):
-    status = await message.reply_text("🔍 Yinelenen telegram kayıtları taranıyor...")
+    status = await message.reply_text("🔍 Arşiv taranıyor...")
 
     total_docs = 0
     total_removed = 0
@@ -691,13 +691,13 @@ async def benzerleri_sil(client: Client, message: Message):
         await client.send_document(
             chat_id=OWNER_ID,
             document=log_path,
-            caption="🗑️ Silinen yinelenen telegram kayıtları"
+            caption="🗑️ Silinen videolar"
         )
 
     await status.edit_text(
         f"✅ İşlem tamamlandı\n\n"
         f"📄 Etkilenen kayıt: {total_docs}\n"
-        f"🗑️ Silinen tekrar: {total_removed}"
+        f"🗑️ Silinen videolar: {total_removed}"
     )
 
 
