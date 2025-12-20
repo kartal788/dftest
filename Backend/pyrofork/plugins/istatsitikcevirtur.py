@@ -200,7 +200,7 @@ async def cevir(client: Client, message: Message):
                 elapsed = int(time.time() - start_time)
                 h, rem = divmod(elapsed, 3600)
                 m, s = divmod(rem, 60)
-                elapsed_str = f"{h}h{m}m{s}s"
+                elapsed_str = f"{h}s{m}d{s}s"
 
                 remaining = (movies_to_translate - translated_movies) + (episodes_to_translate - translated_episodes)
                 eta_str = "hesaplanıyor"
@@ -209,7 +209,7 @@ async def cevir(client: Client, message: Message):
                     eta_sec = int(avg * remaining)
                     eh, er = divmod(eta_sec, 3600)
                     em, es = divmod(er, 60)
-                    eta_str = f"{eh}h{em}m{es}s"
+                    eta_str = f"{eh}s{em}d{es}s"
 
                 if time.time() - last_update >= update_interval or idx >= len(ids):
                     last_update = time.time()
