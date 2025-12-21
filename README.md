@@ -485,7 +485,7 @@ server {
     }
 }
 ```
-7) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
+8) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
 sudo nginx -t
 sudo systemctl restart nginx
