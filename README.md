@@ -428,6 +428,69 @@ sudo apt install caddy
 ✅ Your API will now be available securely at:
 ➡️ `https://your-domain.com`
 
+# 📺 https yapma
+1) certbot kur.
+```bash
+sudo apt update
+sudo apt install certbot python3-certbot-nginx -y
+```
+2) duckdnsli kodu terminale yapıştır.
+```bash
+sudo nano /etc/nginx/sites-available/siteaderim.duckdns.org
+```
+3) kodu yapıştır
+```bash
+server {
+    listen 80;
+    server_name siteaderim.duckdns.org;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+4) Kodu yapıştır.
+```bash
+sudo ln -s /etc/nginx/sites-available/siteaderim.duckdns.org /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+5) Kodu yapıştır.
+```bash
+sudo certbot --nginx -d siteaderim.duckdns.org
+```
+6) Kodu yapıştır.
+```bash
+sudo nano /etc/nginx/sites-available/siteaderim.duckdns.org
+```
+7) Kodu yapıştır.
+```bash
+server {
+    listen 8443 ssl;
+    server_name siteaderim.duckdns.org;
+
+    ssl_certificate /etc/letsencrypt/live/siteaderim.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/siteaderim.duckdns.org/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+7) Kodu yapıştır.
+```bash
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
 
 # 📺 Setting up Stremio
 
