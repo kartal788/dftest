@@ -77,10 +77,10 @@ async def ekle(client: Client, message: Message):
 
     if not lines:
         return await message.reply_text(
-            "Kullanım:\n/ekle link [imdb|tmdb|filename]\nveya\n/ekle\\nlink"
+            "Kullanım:\n/ekle link\nveya\n/ekle link dosya adı"
         )
 
-    status = await message.reply_text("📥 Metadata alınıyor...")
+    status = await message.reply_text("📥 Dizi/film ekleniyor...")
 
     movie_count = 0
     series_count = 0
