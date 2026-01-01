@@ -284,3 +284,93 @@ async def sil_onay(client: Client, message: Message):
         )
     else:
         await message.reply_text("❌ Silme iptal edildi.")
+
+@Client.on_message(filters.command("calismayanlinklerisil") & filters.private & CustomFilters.owner)
+async def calismayan_linkleri_sil(client: Client, message: Message):
+
+    status = await message.reply_text("🔍 Linkler kontrol ediliyor...")
+
+    async def link_calismiyor_mu(url: str) -> bool:
+        if not url.startswith(("http://", "https://")):
+            return False
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.head(url, allow_redirects=True, timeout=20) as r:
+                    size = r.headers.get("Content-Length")
+                    if not size:
+                        return True
+                    return int(size) < (5 * 1024 * 1024)
+        except:
+            return True
+
+    silinen_film = 0
+    silinen_dizi = 0
+    silinen_bolum = 0
+    silinen_link = 0
+
+    # ---------------- MOVIES ----------------
+    async for movie in movie_col.find({}):
+        telegramlar = movie.get("telegram", [])
+        yeni_telegram = []
+
+        for t in telegramlar:
+            if await link_calismiyor_mu(t.get("id", "")):
+                silinen_link += 1
+            else:
+                yeni_telegram.append(t)
+
+        if not yeni_telegram:
+            await movie_col.delete_one({"_id": movie["_id"]})
+            silinen_film += 1
+        elif len(yeni_telegram) != len(telegramlar):
+            await movie_col.update_one(
+                {"_id": movie["_id"]},
+                {"$set": {"telegram": yeni_telegram}}
+            )
+
+    # ---------------- TV ----------------
+    async for tv in series_col.find({}):
+        sezonlar = []
+        dizi_bos = True
+
+        for season in tv.get("seasons", []):
+            bolumler = []
+
+            for ep in season.get("episodes", []):
+                telegramlar = ep.get("telegram", [])
+                yeni_telegram = []
+
+                for t in telegramlar:
+                    if await link_calismiyor_mu(t.get("id", "")):
+                        silinen_link += 1
+                    else:
+                        yeni_telegram.append(t)
+
+                if yeni_telegram:
+                    ep["telegram"] = yeni_telegram
+                    bolumler.append(ep)
+                    dizi_bos = False
+                else:
+                    silinen_bolum += 1
+
+            if bolumler:
+                season["episodes"] = bolumler
+                sezonlar.append(season)
+
+        if dizi_bos:
+            await series_col.delete_one({"_id": tv["_id"]})
+            silinen_dizi += 1
+        else:
+            await series_col.update_one(
+                {"_id": tv["_id"]},
+                {"$set": {"seasons": sezonlar}}
+            )
+
+    await status.edit_text(
+        "✅ Temizlik tamamlandı\n\n"
+        f"🔗 Silinen link: {silinen_link}\n"
+        f"🎬 Silinen film: {silinen_film}\n"
+        f"📺 Silinen dizi: {silinen_dizi}\n"
+        f"📼 Silinen bölüm: {silinen_bolum}"
+    )
+
