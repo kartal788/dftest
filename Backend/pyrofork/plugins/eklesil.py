@@ -285,6 +285,7 @@ async def sil_onay(client: Client, message: Message):
     else:
         await message.reply_text("❌ Silme iptal edildi.")
 
+# ------------------calismayanlinklerisil------------------
 @Client.on_message(filters.command("calismayanlinklerisil") & filters.private & CustomFilters.owner)
 async def calismayan_linkleri_sil(client: Client, message: Message):
 
@@ -308,6 +309,8 @@ async def calismayan_linkleri_sil(client: Client, message: Message):
     silinen_bolum = 0
     silinen_link = 0
 
+    silinen_isimler = []
+
     # ---------------- MOVIES ----------------
     async for movie in movie_col.find({}):
         telegramlar = movie.get("telegram", [])
@@ -316,6 +319,7 @@ async def calismayan_linkleri_sil(client: Client, message: Message):
         for t in telegramlar:
             if await link_calismiyor_mu(t.get("id", "")):
                 silinen_link += 1
+                silinen_isimler.append(f"🎬 {t.get('name')}")
             else:
                 yeni_telegram.append(t)
 
@@ -343,6 +347,7 @@ async def calismayan_linkleri_sil(client: Client, message: Message):
                 for t in telegramlar:
                     if await link_calismiyor_mu(t.get("id", "")):
                         silinen_link += 1
+                        silinen_isimler.append(f"📺 {t.get('name')}")
                     else:
                         yeni_telegram.append(t)
 
@@ -366,11 +371,23 @@ async def calismayan_linkleri_sil(client: Client, message: Message):
                 {"$set": {"seasons": sezonlar}}
             )
 
-    await status.edit_text(
+    # ---------------- SONUÇ ----------------
+    header = (
         "✅ Temizlik tamamlandı\n\n"
         f"🔗 Silinen link: {silinen_link}\n"
-        f"🎬 Silinen film: {silinen_film}\n"
-        f"📺 Silinen dizi: {silinen_dizi}\n"
-        f"📼 Silinen bölüm: {silinen_bolum}"
     )
 
+    if len(silinen_isimler) <= 15:
+        detay = "\n".join(silinen_isimler)
+        await status.edit_text(header + detay)
+    else:
+        txt_path = "/tmp/silinen_linkler.txt"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(silinen_isimler))
+
+        await client.send_document(
+            chat_id=message.chat.id,
+            document=txt_path,
+            caption=header + "\n📄 Silinen içerik listesi dosya olarak gönderildi."
+        )
+        await status.delete()
