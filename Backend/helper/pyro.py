@@ -144,28 +144,17 @@ async def restart_notification():
 # Bot commands
 commands = [
 BotCommand("start", "🚀 Botu başlatır."),
-BotCommand("ekle", "⭐ Film veya dizi linki ekler."),
-BotCommand("pixeldrain", "📊 Pixeldrain istatistiklerini gösterir."),
-BotCommand("pixeldrainsil", "🗑️ Pixeldrain videolarını siler."),
+BotCommand("ekle", "➕ Film veya dizi linki ekler."),
 BotCommand("istatistik", "📈 Bot istatistiklerini görüntüler."),
-BotCommand("cevir", "🇹🇷 Açıklamaları Türkçeye çevirir."),
-BotCommand("tur", "🎭 Türleri Türkçeye çevirir."),
-BotCommand("platformekle", "➕ Platform ekler."),
-BotCommand("platformsil", "➖ Platform siler."),
-BotCommand("aynivideolarisil", "♻️ Aynı olan videoları siler."),
-BotCommand("linklerisil", "🔗 Link içeren videoları siler."),
+BotCommand("tur", "🇹🇷 Türleri Türkçeye çevirir."),
+BotCommand("aynivideolarisil", "🧹 Aynı olan videoları siler."),
 BotCommand("calismayanlinklerisil", "🗑️ Çalışmayan linkleri siler."),
-BotCommand("restart", "♻️ Botu yeniden başlatır."),
-BotCommand("set", "🎬 IMDb meta verilerini elle ekler."),
-BotCommand("vindir", "💾 Veritabanını indirir."),
-BotCommand("m3uindir", "📂 M3U dosyasını indirir."),
-BotCommand("log", "📄 Günlük dosyasını gönderir."),
-BotCommand("fixmetadata", "⚙️ Meta veri boş alanlarını düzeltir."),
-BotCommand("sil", "🗑️ Tüm filmleri ve dizileri siler."),
 BotCommand("dizisil", "📺 Dizi siler (sezon ve bölüm destekli)."),
-BotCommand("dizisiltest", "📝 Dizi silme test modu."),
 BotCommand("filmsil", "🎬 Film siler."),
-BotCommand("filmsiltest", "📝 Film silme test modu.")
+BotCommand("vindir", "💾 Veritabanını indirir."),
+BotCommand("log", "📄 Günlük dosyasını gönderir."),
+BotCommand("set", "🎬 IMDb meta verilerini elle ekler."),
+BotCommand("restart", "♻️ Botu yeniden başlatır.")
 ]
 
 
